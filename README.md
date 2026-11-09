@@ -4,6 +4,30 @@ A fast, zero-dependency, mobile- and desktop-responsive Web Interface for **Klip
 
 ---
 
+## 📸 Web Interface Screenshots (Desktop & Mobile)
+
+| **Operator Home Dashboard** | **Interactive 3D Bed Mesh** |
+|:---:|:---:|
+| ![Operator Home Dashboard](assets/screenshots/01_home_dashboard.png) | ![Interactive 3D Bed Mesh](assets/screenshots/02_3d_bed_mesh.png) |
+| *Live temperatures, collapsible/rearrangeable cards, load-cell force gauge, XY/Z jog pad & G-code console* | *Touch/mouse drag-to-rotate 3D build plate with coloured height spots, topography & min/max callouts* |
+
+| **Pro G-Code File Manager** | **Visual Spool Showcase & Manager** |
+|:---:|:---:|
+| ![Pro G-Code File Manager](assets/screenshots/03_files_manager.png) | ![Visual Spool Showcase & Manager](assets/screenshots/04_spool_manager.png) |
+| *Slicer thumbnail previews, drag-and-drop multi-file upload dropzone, search & print confirmation* | *Tinted filament spool card (tap card to configure material, colour & temps), load/unload & manual extrude* |
+
+| **Visual Calibration Hub** | **Built-in `printer.cfg` Code Editor** |
+|:---:|:---:|
+| ![Visual Calibration Hub](assets/screenshots/05_calibrate_hub.png) | ![Built-in printer.cfg Code Editor](assets/screenshots/06_config_editor.png) |
+| *Z-Offset paper test, manual Dual-Z trim, bed screws, input shaper, probe accuracy & PID autotune* | *Syntax-highlighted config editor with section navigation, search, font zoom & one-click Save & Restart* |
+
+| **Manual Dual-Z Motor Trim** | **Tap-to-Edit Spool Settings Modal** |
+|:---:|:---:|
+| ![Manual Dual-Z Motor Trim](assets/screenshots/07_dual_z_trim.png) | ![Tap-to-Edit Spool Settings Modal](assets/screenshots/08_spool_settings.png) |
+| *Independent leadscrew alignment with live gantry tilt diagram and CW/CCW turn guides* | *One-tap material presets (`PLA`, `PETG`, `ABS`, `ASA`, `TPU`, etc.), 16 colours & temperature steppers* |
+
+---
+
 ## ✨ Features
 
 - **📱 Mobile & Desktop Responsive**:
