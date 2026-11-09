@@ -284,6 +284,13 @@ select,input{background:#1E293B;border:1px solid #475569;border-radius:8px;color
 .print-card.is-dragging{opacity:.45;transform:scale(.98);border:1.5px dashed #00E5FF!important;box-shadow:0 0 20px rgba(0,229,255,.25)!important}
 .print-card.drag-over-top{border-top:3px solid #00E5FF!important;box-shadow:0 -4px 14px rgba(0,229,255,.35)}
 .print-card.drag-over-bottom{border-bottom:3px solid #00E5FF!important;box-shadow:0 4px 14px rgba(0,229,255,.35)}
+.print-card.is-collapsed .card-content{display:none!important}
+.print-card.is-collapsed{padding-bottom:14px!important}
+.print-card.is-collapsed .card-top-handle{margin-bottom:-14px!important;border-bottom:none!important}
+.gcode-card.is-collapsed{padding-bottom:10px!important}
+.gcode-card.is-collapsed .card-top-handle{margin-bottom:-10px!important;border-bottom:none!important}
+.card-collapse-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#94A3B8;border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:22px}
+.card-collapse-btn:hover{background:rgba(0,229,255,.15);color:#00E5FF;border-color:rgba(0,229,255,.35)}
 .gcode-card{padding:10px!important;display:flex;flex-direction:column}
 .gcode-card .card-top-handle{margin:-10px -10px 8px -10px}
 .cam-card{padding:10px!important}

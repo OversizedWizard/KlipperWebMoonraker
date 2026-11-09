@@ -196,6 +196,7 @@ App.pages.files=(()=>{
             <span>${fmtDate(it.mod)}</span>
           </div>
           <div class="fcard-actions">
+            <button class="btn sm fc-load" style="border-color:rgba(0,229,255,.45);color:#00E5FF;font-weight:800;padding:4px 8px" title="Load file ready to print & preview in 3D">📥 Load</button>
             <button class="btn pri sm grow fc-print" style="font-weight:800">🚀 Print</button>
             <button class="btn sm fc-info" title="File details">${ICON('info',16)}</button>
             <button class="btn sm fc-del" title="Delete file" style="color:#EF4444">${ICON('trash',16)}</button>
@@ -204,6 +205,7 @@ App.pages.files=(()=>{
       </div>
     `);
 
+    $('.fc-load',card).onclick=e=>{e.stopPropagation();loadFileForPrint(full,it);};
     $('.fc-print',card).onclick=e=>{
       e.stopPropagation();
       confirmBox('Start Print?',`Begin printing "${it.name}" immediately?`,'Start Print',async()=>{
@@ -261,6 +263,7 @@ App.pages.files=(()=>{
           <span class="mono" style="font-weight:700">${fmtSize(it.size)}</span>
         </div>
         <div class="frow-actions">
+          <button class="btn sm r-load" style="border-color:rgba(0,229,255,.45);color:#00E5FF;font-weight:800;padding:4px 10px" title="Load file ready to print & preview in 3D">📥 Load</button>
           <button class="btn pri sm r-print" style="font-weight:800">🚀 Print</button>
           <button class="btn sm r-info" title="File details">${ICON('info',16)}</button>
           <button class="btn sm r-del" title="Delete file" style="color:#EF4444">${ICON('trash',16)}</button>
@@ -268,6 +271,7 @@ App.pages.files=(()=>{
       </div>
     `);
 
+    $('.r-load',row).onclick=e=>{e.stopPropagation();loadFileForPrint(full,it);};
     $('.r-print',row).onclick=e=>{
       e.stopPropagation();
       confirmBox('Start Print?',`Begin printing "${it.name}" immediately?`,'Start Print',async()=>{
@@ -404,6 +408,7 @@ App.pages.files=(()=>{
         <button class="btn danger sm" id="ddel" style="gap:4px">${ICON('trash')} Delete File</button>
         <div class="row" style="gap:8px">
           <button class="btn" id="dc">Close</button>
+          <button class="btn sm" id="dload" style="border-color:rgba(0,229,255,.45);color:#00E5FF;font-weight:800;padding:8px 16px" title="Load file ready to print and preview in 3D">📥 LOAD FILE</button>
           <button class="btn pri" id="ds" style="font-weight:800;padding:8px 18px">🚀 START PRINT</button>
         </div>
       </div>
@@ -412,6 +417,7 @@ App.pages.files=(()=>{
     const close=modal(n);
     $('#dx',n).onclick=$('#dc',n).onclick=close;
     $('#ddel',n).onclick=()=>{close();confirmDelete(it,full);};
+    $('#dload',n).onclick=()=>{close();loadFileForPrint(full,it);};
     $('#ds',n).onclick=async()=>{
       close();
       toast('Starting print…');
@@ -423,6 +429,34 @@ App.pages.files=(()=>{
       }
     };
   }
+
+  async function loadFileForPrint(full,it){
+    const name=it?.name||full.split('/').pop();
+    toast(`Loading "${name}"…`);
+    App.loadedFile={
+      filename:full,
+      name:name,
+      size:it?.size||0,
+      mod:it?.mod||(Date.now()/1000),
+      loadedAt:Date.now()
+    };
+    try{localStorage.setItem('klipper_loaded_file',JSON.stringify(App.loadedFile));}catch(e){}
+
+    try{await MR.gcode('M23 '+full);}catch(e){console.warn('M23 load:',e);}
+
+    if(window.GCodeViewer&&full.toLowerCase().endsWith('.gcode')){
+      const gcodeUrl=(MR.base||'')+'/server/files/gcodes/'+encodeURI(full);
+      window.GCodeViewer.loadFromUrl(gcodeUrl,name);
+    }
+
+    if(typeof App.updateLoadedUI==='function'){
+      App.updateLoadedUI();
+    }
+
+    toast(`📥 Loaded: ${name} (ready to print)`);
+    go('printing');
+  }
+  App.loadFileForPrint=loadFileForPrint;
 
   async function openTimelapsesModal(){
     const n=el(`<div class="dlg" style="max-width:680px;border:1.5px solid rgba(192,132,252,.45)">
@@ -975,15 +1009,18 @@ App.pages.printing=(()=>{
 
    <div class="print-grid">
     <div class="print-col" id="print-col-1">
-      <!-- 3D G-Code Visualizer Card -->
-      <div class="card print-card gcode-card" id="card-visualizer" data-card-id="visualizer">
+      <!-- 3D G-Code Visualizer Card (collapsed by default) -->
+      <div class="card print-card gcode-card is-collapsed" id="card-visualizer" data-card-id="visualizer">
         <div class="card-top-handle" title="Drag to rearrange card">
           <span class="drag-grip">⠿</span>
           <b class="card-drag-title">${CICON('speed')} 3D G-CODE VISUALIZER & NOZZLE</b>
           <span class="grow"></span>
           <span class="sub" style="font-size:11px;color:#38BDF8;font-weight:700">ROTATABLE 3D VIEW</span>
+          <button class="card-collapse-btn" title="Collapse / Expand card">▶</button>
         </div>
-        <div id="gcode-container" style="width:100%;height:380px;position:relative"></div>
+        <div class="card-content">
+          <div id="gcode-container" style="width:100%;height:380px;position:relative"></div>
+        </div>
       </div>
 
       <!-- Print Job & Toolhead Info -->
@@ -992,17 +1029,33 @@ App.pages.printing=(()=>{
           <span class="drag-grip">⠿</span>
           <b class="card-drag-title">${CICON('file')} CURRENT PRINT JOB & TOOLHEAD</b>
           <span class="grow"></span>
+          <button class="card-collapse-btn" title="Collapse / Expand card">▼</button>
         </div>
-        <div class="print-file" style="width:100%;align-items:flex-start;gap:14px">
-          <img id="pthumb" class="thumb" alt="" style="width:110px;height:110px;border-radius:12px;background:#070B14;border:1px solid rgba(0,229,255,.25);object-fit:contain;flex:none">
-          <div class="fico">${CICON('file')}</div>
-          <div class="grow col" style="min-width:0;gap:3px">
-            <div class="fn pf" id="pfile" style="font-size:16.5px;font-weight:800;color:#F8FAFC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">No print</div>
-            <div class="mono" id="p-layer-line" style="font-size:14.5px;font-weight:800;color:#38BDF8">Layer: 0 / 0</div>
-            <div class="mono" id="p-z-line" style="font-size:14px;font-weight:700;color:#E2E8F0">Z: 0.00 mm</div>
-            <div class="mono" id="p-xy-line" style="font-size:14px;font-weight:700;color:#E2E8F0">X: 0.0   Y: 0.0 mm</div>
-            <div class="mono" id="p-spd-line" style="font-size:14px;font-weight:800;color:#34D399">Speed: 0 mm/s</div>
-            <div class="sub pa" id="pact" style="font-size:12.5px!important;color:#94A3B8;margin-top:1px">Idle</div>
+        <div class="card-content">
+          <div class="print-file" style="width:100%;align-items:flex-start;gap:14px">
+            <img id="pthumb" class="thumb" alt="" style="width:110px;height:110px;border-radius:12px;background:#070B14;border:1px solid rgba(0,229,255,.25);object-fit:contain;flex:none">
+            <div class="fico">${CICON('file')}</div>
+            <div class="grow col" style="min-width:0;gap:3px">
+              <div class="fn pf" id="pfile" style="font-size:16.5px;font-weight:800;color:#F8FAFC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">No print</div>
+              <div class="mono" id="p-layer-line" style="font-size:14.5px;font-weight:800;color:#38BDF8">Layer: 0 / 0</div>
+              <div class="mono" id="p-z-line" style="font-size:14px;font-weight:700;color:#E2E8F0">Z: 0.00 mm</div>
+              <div class="mono" id="p-xy-line" style="font-size:14px;font-weight:700;color:#E2E8F0">X: 0.0   Y: 0.0 mm</div>
+              <div class="mono" id="p-spd-line" style="font-size:14px;font-weight:800;color:#34D399">Speed: 0 mm/s</div>
+              <div class="sub pa" id="pact" style="font-size:12.5px!important;color:#94A3B8;margin-top:1px">Idle</div>
+            </div>
+          </div>
+          <div id="ploaded-bar" style="display:none;margin-top:12px;padding:8px 12px;background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.3);border-radius:10px;align-items:center;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0">
+              <span style="color:#00E5FF;font-weight:900;font-size:16px;flex:none">📥</span>
+              <div style="min-width:0">
+                <div style="font-size:11px;font-weight:800;color:#00E5FF;text-transform:uppercase;letter-spacing:.5px">File Loaded Ready To Print</div>
+                <div id="ploaded-name" style="font-size:13.5px;font-weight:700;color:#F8FAFC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;flex:none">
+              <button class="btn sm" id="btn-unload-file" style="border-color:rgba(239,68,68,.3);color:#EF4444" title="Unload file">✕ Unload</button>
+              <button class="btn pri sm" id="btn-start-loaded" style="font-weight:800;background:linear-gradient(135deg,#00E5FF,#2563EB);border:none;padding:6px 16px;box-shadow:0 0 12px rgba(0,229,255,.4)">🚀 START PRINT</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1013,16 +1066,19 @@ App.pages.printing=(()=>{
           <span class="drag-grip">⠿</span>
           <b class="card-drag-title">${CICON('offset')} LIVE Z-OFFSET / BABYSTEPS</b>
           <span class="grow"></span>
+          <button class="card-collapse-btn" title="Collapse / Expand card">▼</button>
         </div>
-        <div class="row" style="align-items:baseline">
-          <span class="big" id="pz">+0.000 mm</span>
-          <span class="sub grow" id="pbs">Baby steps added: 0</span>
-        </div>
-        <div class="grid4" style="margin-top:8px">
-          <button class="btn xl" data-z="-0.05">-0.05</button>
-          <button class="btn xl" data-z="-0.01">-0.01</button>
-          <button class="btn xl" data-z="0.01">+0.01</button>
-          <button class="btn xl" data-z="0.05">+0.05</button>
+        <div class="card-content">
+          <div class="row" style="align-items:baseline">
+            <span class="big" id="pz">+0.000 mm</span>
+            <span class="sub grow" id="pbs">Baby steps added: 0</span>
+          </div>
+          <div class="grid4" style="margin-top:8px">
+            <button class="btn xl" data-z="-0.05">-0.05</button>
+            <button class="btn xl" data-z="-0.01">-0.01</button>
+            <button class="btn xl" data-z="0.01">+0.01</button>
+            <button class="btn xl" data-z="0.05">+0.05</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1035,22 +1091,25 @@ App.pages.printing=(()=>{
           <b class="card-drag-title">${CICON('hourglass')} PRINT PROGRESS & ESTIMATES</b>
           <span class="grow"></span>
           <span class="pill info pbig" id="pstate">STANDBY</span>
+          <button class="card-collapse-btn" title="Collapse / Expand card">▼</button>
         </div>
-        <div class="row" style="align-items:center">
-          <div class="ppct" id="ppct">0%</div>
-          <span class="grow"></span>
-          <span class="pill pbig" id="pzo">Z-Offset --</span>
-        </div>
-        <div class="pbar big"><i id="pfill"></i><span id="pbt"></span></div>
-        <div class="grid3">
-          <div class="tile"><div class="tic">${CICON('clock')}</div><div class="k">ELAPSED</div><div class="vv" id="pel">--</div></div>
-          <div class="tile"><div class="tic">${CICON('hourglass')}</div><div class="k">REMAINING</div><div class="vv" id="prem">--</div></div>
-          <div class="tile"><div class="tic">${CICON('flag')}</div><div class="k">PRINT ETA</div><div class="vv" id="peta">--</div></div>
-        </div>
-        <div class="grid3" style="margin-top:8px">
-          <div class="tile"><div class="tic">${CICON('clock')}</div><div class="k">SLICER TOTAL</div><div class="vv" id="psltot" style="color:#38BDF8">--</div></div>
-          <div class="tile"><div class="tic">${CICON('hourglass')}</div><div class="k">SLICER LEFT</div><div class="vv" id="pslrem" style="color:#FBBF24">--</div></div>
-          <div class="tile"><div class="tic">${CICON('flag')}</div><div class="k">SLICER ETA</div><div class="vv" id="psleta" style="color:#C084FC">--</div></div>
+        <div class="card-content col" style="gap:8px">
+          <div class="row" style="align-items:center">
+            <div class="ppct" id="ppct">0%</div>
+            <span class="grow"></span>
+            <span class="pill pbig" id="pzo">Z-Offset --</span>
+          </div>
+          <div class="pbar big"><i id="pfill"></i><span id="pbt"></span></div>
+          <div class="grid3">
+            <div class="tile"><div class="tic">${CICON('clock')}</div><div class="k">ELAPSED</div><div class="vv" id="pel">--</div></div>
+            <div class="tile"><div class="tic">${CICON('hourglass')}</div><div class="k">REMAINING</div><div class="vv" id="prem">--</div></div>
+            <div class="tile"><div class="tic">${CICON('flag')}</div><div class="k">PRINT ETA</div><div class="vv" id="peta">--</div></div>
+          </div>
+          <div class="grid3" style="margin-top:8px">
+            <div class="tile"><div class="tic">${CICON('clock')}</div><div class="k">SLICER TOTAL</div><div class="vv" id="psltot" style="color:#38BDF8">--</div></div>
+            <div class="tile"><div class="tic">${CICON('hourglass')}</div><div class="k">SLICER LEFT</div><div class="vv" id="pslrem" style="color:#FBBF24">--</div></div>
+            <div class="tile"><div class="tic">${CICON('flag')}</div><div class="k">SLICER ETA</div><div class="vv" id="psleta" style="color:#C084FC">--</div></div>
+          </div>
         </div>
       </div>
 
@@ -1061,14 +1120,17 @@ App.pages.printing=(()=>{
           <b class="card-drag-title">${CICON('tune')} TEMPERATURES & PRINT OVERRIDES</b>
           <span class="grow"></span>
           <span class="sub" style="font-size:11px">TAP TO TUNE</span>
+          <button class="card-collapse-btn" title="Collapse / Expand card">▼</button>
         </div>
-        <div class="grid3" id="pmet">
-          <div class="tile" id="pt-nozzle" title="Tap to adjust Nozzle temperature" style="cursor:pointer;border-color:rgba(255,122,0,.38)"><div class="tic">${CICON('nozzle')}</div><div class="k">NOZZLE <small style="color:#FF7A00;font-size:9px">● TUNE</small></div><div class="vv" id="pm-noz">--</div></div>
-          <div class="tile" id="pt-bed" title="Tap to adjust Bed temperature" style="cursor:pointer;border-color:rgba(0,229,255,.38)"><div class="tic">${CICON('bed')}</div><div class="k">BED <small style="color:#00E5FF;font-size:9px">● TUNE</small></div><div class="vv" id="pm-bed">--</div></div>
-          <div class="tile"><div class="tic">${CICON('layers')}</div><div class="k">LAYER</div><div class="vv" id="pm-lay" style="color:#C084FC">0/0</div></div>
-          <div class="tile"><div class="tic">${CICON('speed')}</div><div class="k">SPEED</div><div class="vv" id="pm-spd">100%</div></div>
-          <div class="tile"><div class="tic">${CICON('flow')}</div><div class="k">FLOW</div><div class="vv" id="pm-flw">100%</div></div>
-          <div class="tile"><div class="tic">${CICON('fan')}</div><div class="k">FAN</div><div class="vv" id="pm-fan">0%</div></div>
+        <div class="card-content">
+          <div class="grid3" id="pmet">
+            <div class="tile" id="pt-nozzle" title="Tap to adjust Nozzle temperature" style="cursor:pointer;border-color:rgba(255,122,0,.38)"><div class="tic">${CICON('nozzle')}</div><div class="k">NOZZLE <small style="color:#FF7A00;font-size:9px">● TUNE</small></div><div class="vv" id="pm-noz">--</div></div>
+            <div class="tile" id="pt-bed" title="Tap to adjust Bed temperature" style="cursor:pointer;border-color:rgba(0,229,255,.38)"><div class="tic">${CICON('bed')}</div><div class="k">BED <small style="color:#00E5FF;font-size:9px">● TUNE</small></div><div class="vv" id="pm-bed">--</div></div>
+            <div class="tile"><div class="tic">${CICON('layers')}</div><div class="k">LAYER</div><div class="vv" id="pm-lay" style="color:#C084FC">0/0</div></div>
+            <div class="tile"><div class="tic">${CICON('speed')}</div><div class="k">SPEED</div><div class="vv" id="pm-spd">100%</div></div>
+            <div class="tile"><div class="tic">${CICON('flow')}</div><div class="k">FLOW</div><div class="vv" id="pm-flw">100%</div></div>
+            <div class="tile"><div class="tic">${CICON('fan')}</div><div class="k">FAN</div><div class="vv" id="pm-fan">0%</div></div>
+          </div>
         </div>
       </div>
 
@@ -1078,16 +1140,24 @@ App.pages.printing=(()=>{
           <span class="drag-grip">⠿</span>
           <b class="card-drag-title">${CICON('power')} PRINT ACTIONS & CONTROLS</b>
           <span class="grow"></span>
+          <button class="card-collapse-btn" title="Collapse / Expand card">▼</button>
         </div>
-        <div class="grid4" id="pbtns">
-          <button class="btn xl pri" id="ppause">⏸ Pause</button>
-          <button class="btn xl" id="pexclude" style="border-color:rgba(251,191,36,.45);color:#FBBF24" title="Cancel individual failed object during print">🎯 Exclude</button>
-          <button class="btn xl" id="ptune">${ICON('tune',20)} Fine Tune</button>
-          <button class="btn xl danger" id="pcancel">✕ Cancel</button>
-        </div>
-        <div class="grid2" id="pdone" style="display:none">
-          <button class="btn xl green" id="psave">Save Z-Offset</button>
-          <button class="btn xl pri" id="phome">Return Home</button>
+        <div class="card-content">
+          <div id="ploaded-ctrls" style="display:none;margin-bottom:10px">
+            <button class="btn xl pri" id="pstart-loaded" style="width:100%;font-weight:900;font-size:15px;background:linear-gradient(135deg,#00E5FF,#2563EB);border:none;box-shadow:0 0 16px rgba(0,229,255,.45);padding:14px;display:flex;align-items:center;justify-content:center;gap:8px">
+              <span>🚀 START PRINT:</span> <span id="pstart-loaded-lbl" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+            </button>
+          </div>
+          <div class="grid4" id="pbtns">
+            <button class="btn xl pri" id="ppause">⏸ Pause</button>
+            <button class="btn xl" id="pexclude" style="border-color:rgba(251,191,36,.45);color:#FBBF24" title="Cancel individual failed object during print">🎯 Exclude</button>
+            <button class="btn xl" id="ptune">${ICON('tune',20)} Fine Tune</button>
+            <button class="btn xl danger" id="pcancel">✕ Cancel</button>
+          </div>
+          <div class="grid2" id="pdone" style="display:none">
+            <button class="btn xl green" id="psave">Save Z-Offset</button>
+            <button class="btn xl pri" id="phome">Return Home</button>
+          </div>
         </div>
       </div>
 
@@ -1101,10 +1171,13 @@ App.pages.printing=(()=>{
           <button class="btn sm" id="camsnap" title="Save Camera Snapshot">📸 Snap</button>
           <button class="btn sm" id="camfs" title="Fullscreen & Flip/Rotate">⛶ Expand</button>
           <button class="btn sm" id="camset">⚙</button>
+          <button class="card-collapse-btn" title="Collapse / Expand card">▼</button>
         </div>
-        <div class="cam-box" id="cambox" style="cursor:pointer">
-          <img id="camimg" alt="" crossorigin="anonymous">
-          <div class="cam-empty" id="camempty">No webcam found.<br><small>Tap ⚙ to enter a stream URL</small></div>
+        <div class="card-content">
+          <div class="cam-box" id="cambox" style="cursor:pointer">
+            <img id="camimg" alt="" crossorigin="anonymous">
+            <div class="cam-empty" id="camempty">No webcam found.<br><small>Tap ⚙ to enter a stream URL</small></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1160,7 +1233,8 @@ App.pages.printing=(()=>{
       const handle = card.querySelector('.card-top-handle');
       if (!handle) return;
 
-      handle.addEventListener('mousedown', () => {
+      handle.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.card-collapse-btn') || e.target.closest('button')) return;
         card.setAttribute('draggable', 'true');
       });
       handle.addEventListener('mouseup', () => {
@@ -1220,6 +1294,7 @@ App.pages.printing=(()=>{
       let touchStartY = 0;
       let isTouching = false;
       handle.addEventListener('touchstart', (e) => {
+        if (e.target.closest('.card-collapse-btn') || e.target.closest('button')) return;
         if (e.touches.length !== 1) return;
         touchStartY = e.touches[0].clientY;
         isTouching = true;
@@ -1287,6 +1362,134 @@ App.pages.printing=(()=>{
   }
 
   initCardDnD();
+
+  // Collapsible cards support with visualizer collapsed by default
+  function initCollapsibleCards() {
+    let collapsedCards = {};
+    try {
+      const raw = localStorage.getItem('klipper_print_collapsed_cards');
+      if (raw) collapsedCards = JSON.parse(raw);
+    } catch (e) {}
+
+    // Visualizer card is collapsed by default unless explicitly expanded by user
+    if (collapsedCards.visualizer === undefined) {
+      collapsedCards.visualizer = true;
+    }
+
+    root.querySelectorAll('.print-card').forEach(card => {
+      const id = card.dataset.cardId;
+      const btn = card.querySelector('.card-collapse-btn');
+      const isCollapsed = !!collapsedCards[id];
+      card.classList.toggle('is-collapsed', isCollapsed);
+      if (btn) btn.textContent = isCollapsed ? '▶' : '▼';
+
+      if (btn) {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const nowCollapsed = !card.classList.contains('is-collapsed');
+          card.classList.toggle('is-collapsed', nowCollapsed);
+          btn.textContent = nowCollapsed ? '▶' : '▼';
+          collapsedCards[id] = nowCollapsed;
+          try {
+            localStorage.setItem('klipper_print_collapsed_cards', JSON.stringify(collapsedCards));
+          } catch(err) {}
+
+          if (!nowCollapsed && id === 'visualizer' && window.GCodeViewer) {
+            setTimeout(() => window.GCodeViewer.fitBed(), 80);
+          }
+        };
+      }
+    });
+  }
+  initCollapsibleCards();
+
+  // Loaded File State & Controls
+  try {
+    const _savedLf = localStorage.getItem('klipper_loaded_file');
+    if (_savedLf) App.loadedFile = JSON.parse(_savedLf);
+  } catch(e) {}
+
+  function updateLoadedUI(currState) {
+    const s = stat();
+    const ps = s.print_stats || {};
+    const state = currState || ps.state || 'standby';
+    const isPrinting = (state === 'printing' || state === 'paused');
+    const loaded = App.loadedFile;
+
+    const bar = $('#ploaded-bar', root);
+    const barName = $('#ploaded-name', root);
+    const ctrls = $('#ploaded-ctrls', root);
+    const ctrlLbl = $('#pstart-loaded-lbl', root);
+
+    if (loaded && !isPrinting) {
+      if (bar) {
+        bar.style.display = 'flex';
+        if (barName) barName.textContent = loaded.name;
+      }
+      if (ctrls) {
+        ctrls.style.display = 'block';
+        if (ctrlLbl) ctrlLbl.textContent = loaded.name;
+      }
+      if (!ps.filename || ps.filename === 'No print') {
+        const pfile = $('#pfile', root);
+        if (pfile) pfile.textContent = `[Loaded] ${loaded.name}`;
+        const pact = $('#pact', root);
+        if (pact) pact.textContent = 'File loaded — Ready to start';
+        if (loaded.filename) {
+          MR.meta(loaded.filename).then(m => {
+            if (!m) return;
+            const t = m?.thumbnails?.sort((a,b)=>b.width-a.width)[0];
+            if (t) {
+              const d = loaded.filename.includes('/') ? loaded.filename.slice(0, loaded.filename.lastIndexOf('/') + 1) : '';
+              $('#pthumb', root).src = MR.thumbURL(d + t.relative_path);
+            }
+          });
+        }
+      }
+    } else {
+      if (bar) bar.style.display = 'none';
+      if (ctrls) ctrls.style.display = 'none';
+      if (isPrinting && loaded) {
+        App.loadedFile = null;
+        try { localStorage.removeItem('klipper_loaded_file'); } catch(e) {}
+      }
+    }
+  }
+  App.updateLoadedUI = updateLoadedUI;
+
+  const btnStartLoaded = $('#btn-start-loaded', root);
+  if (btnStartLoaded) {
+    btnStartLoaded.onclick = () => {
+      if (!App.loadedFile) return;
+      confirmBox('Start Print?', `Begin printing "${App.loadedFile.name}" now?`, 'Start Print', async () => {
+        toast('Starting print…');
+        try {
+          await MR.startPrint(App.loadedFile.filename);
+        } catch(e) {
+          toast('⚠ Start failed: ' + e.message);
+        }
+      });
+    };
+  }
+  const pstartLoaded = $('#pstart-loaded', root);
+  if (pstartLoaded) {
+    pstartLoaded.onclick = () => btnStartLoaded?.click();
+  }
+  const btnUnloadFile = $('#btn-unload-file', root);
+  if (btnUnloadFile) {
+    btnUnloadFile.onclick = async () => {
+      try {
+        await MR.gcode('SDCARD_RESET_FILE');
+      } catch(e) {}
+      App.loadedFile = null;
+      try { localStorage.removeItem('klipper_loaded_file'); } catch(e) {}
+      $('#pfile', root).textContent = 'No print';
+      $('#pact', root).textContent = 'Idle';
+      $('#pthumb', root).removeAttribute('src');
+      updateLoadedUI();
+      toast('File unloaded');
+    };
+  }
 
   // Initialize G-Code 3D Visualizer
   if (window.GCodeViewer) {
@@ -1489,10 +1692,12 @@ App.pages.printing=(()=>{
     if (window.GCodeViewer) {
       window.GCodeViewer.updatePosition(xPos, yPos, zPos, liveVel, isExt, curLayer, totLayer);
     }
+    updateLoadedUI(state);
   });
   return{
     show(){
       if (window.GCodeViewer) window.GCodeViewer.fitBed();
+      updateLoadedUI();
     },
     onState(st){}
   };

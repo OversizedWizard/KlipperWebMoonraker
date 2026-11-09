@@ -49,12 +49,6 @@ window.GCodeViewer = (function() {
   let animId = null;
   let isVisible = false;
 
-  // Demo simulation mode
-  let isDemo = false;
-  let demoTimer = null;
-  let demoT = 0;
-  let demoLayer = 0;
-
   // Settings
   let showTravel = true;
   let showGrid = true;
@@ -92,7 +86,6 @@ window.GCodeViewer = (function() {
 
         <!-- Bottom Controls & Layer Slider -->
         <div class="gcode-bot-bar" style="position:absolute;bottom:8px;left:8px;right:8px;display:flex;align-items:center;gap:8px;background:rgba(15,23,42,0.85);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.12);padding:6px 12px;border-radius:10px;z-index:2">
-          <button class="btn sm" id="gc-btn-demo" style="border-color:rgba(251,191,36,0.45);color:#FBBF24;font-size:11px;font-weight:800;white-space:nowrap">▶ Demo Print</button>
           <span style="font-size:11px;font-weight:800;color:#94A3B8;white-space:nowrap">LAYER:</span>
           <input type="range" id="gc-layer-slider" min="0" max="0" value="0" style="flex:1;cursor:pointer;accent-color:#00E5FF;height:6px">
           <span id="gc-slider-val" class="mono" style="font-size:11.5px;font-weight:800;color:#00E5FF;min-width:55px;text-align:right">ALL</span>
@@ -107,7 +100,6 @@ window.GCodeViewer = (function() {
 
     setupEvents();
     resizeCanvas();
-    generateSamplePrint();
 
     // ResizeObserver for clean responsive auto-scaling
     const ro = new ResizeObserver(() => resizeCanvas());
@@ -152,7 +144,6 @@ window.GCodeViewer = (function() {
       followNozzle = !followNozzle;
       updateFollowBtn();
     });
-    container.querySelector('#gc-btn-demo')?.addEventListener('click', toggleDemo);
     container.querySelector('#gc-btn-clear')?.addEventListener('click', () => {
       layers = [];
       layerMap.clear();
@@ -692,90 +683,6 @@ window.GCodeViewer = (function() {
     ctx.fillText('Z', pZ.x + 3, pZ.y - 2);
   }
 
-  // Pre-generate sample 3D print model so the visualizer is immediately rich on load
-  function generateSamplePrint() {
-    layers = [];
-    layerMap.clear();
-    const cx = bedW / 2;
-    const cy = bedH / 2;
-    const r = 36;
-    for (let l = 1; l <= 14; l++) {
-      const z = l * 0.28;
-      const lay = { z, paths: [] };
-      const pts = [];
-      const sides = 8;
-      for (let s = 0; s <= sides; s++) {
-        const ang = (s / sides) * Math.PI * 2 + l * 0.05;
-        const rad = r + Math.sin(ang * 3 + l * 0.2) * 8;
-        pts.push({ x: cx + Math.cos(ang) * rad, y: cy + Math.sin(ang) * rad });
-      }
-      for (let i = 0; i < pts.length - 1; i++) {
-        lay.paths.push({ x1: pts[i].x, y1: pts[i].y, z1: z, x2: pts[i+1].x, y2: pts[i+1].y, z2: z, ext: true });
-      }
-      layerMap.set(z, lay);
-      layers.push(lay);
-    }
-    totLayer = layers.length;
-    curLayer = layers.length;
-    const topLay = layers[layers.length - 1];
-    const lastP = topLay.paths[topLay.paths.length - 1];
-    targetNozzle.x = lastP.x2;
-    targetNozzle.y = lastP.y2;
-    targetNozzle.z = topLay.z;
-    nozzle.x = targetNozzle.x;
-    nozzle.y = targetNozzle.y;
-    nozzle.z = targetNozzle.z;
-    updateLayerSlider();
-  }
-
-  // Demo Simulation Mode (Benchy & Spiral Star demo)
-  function toggleDemo() {
-    isDemo = !isDemo;
-    const btn = container?.querySelector('#gc-btn-demo');
-    if (btn) {
-      btn.textContent = isDemo ? '⏹ Stop Demo' : '▶ Demo Print';
-      btn.style.color = isDemo ? '#EF4444' : '#FBBF24';
-      btn.style.borderColor = isDemo ? 'rgba(239,68,68,0.5)' : 'rgba(251,191,36,0.45)';
-    }
-
-    if (!isDemo) {
-      clearInterval(demoTimer);
-      return;
-    }
-
-    // Clear existing for fresh demo
-    layers = [];
-    layerMap.clear();
-    demoT = 0;
-    demoLayer = 1;
-    totLayer = 50;
-
-    toast('▶ Starting 3D Print Simulation');
-
-    clearInterval(demoTimer);
-    demoTimer = setInterval(() => {
-      demoT += 0.08;
-      const r = 38 + Math.sin(demoT * 3) * 12;
-      const cx = bedW / 2;
-      const cy = bedH / 2;
-      const x = cx + Math.cos(demoT) * r;
-      const y = cy + Math.sin(demoT) * r;
-      const z = demoLayer * 0.2;
-
-      updatePosition(x, y, z, 140, true, demoLayer, totLayer);
-
-      if (demoT > demoLayer * Math.PI * 2) {
-        demoLayer++;
-        if (demoLayer > totLayer) {
-          demoLayer = 1;
-          demoT = 0;
-          layers = [];
-          layerMap.clear();
-        }
-      }
-    }, 32);
-  }
-
   // Load and Parse G-code string
   function loadGCode(gcodeText) {
     if (!gcodeText) return;
@@ -784,54 +691,99 @@ window.GCodeViewer = (function() {
 
     const lines = gcodeText.split('\n');
     let curX = 0, curY = 0, curZ = 0;
-    let isExt = false;
-    let curLay = 1;
+    let curLayZ = 0;
+    let currentLayer = null;
 
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line || line.startsWith(';')) {
-        if (/;LAYER:\s*(\d+)/i.test(line)) {
-          curLay = parseInt(RegExp.$1, 10);
-        }
-        continue;
-      }
+      const raw = lines[i];
+      const semiIdx = raw.indexOf(';');
+      const line = (semiIdx >= 0 ? raw.slice(0, semiIdx) : raw).trim();
+      if (!line) continue;
 
-      if (line.startsWith('G0') || line.startsWith('G1')) {
+      if (line.startsWith('G0') || line.startsWith('G1') || line.startsWith('G2') || line.startsWith('G3')) {
         let x = curX, y = curY, z = curZ;
         let ext = false;
 
-        const mX = /X([\d.-]+)/.exec(line);
-        const mY = /Y([\d.-]+)/.exec(line);
-        const mZ = /Z([\d.-]+)/.exec(line);
-        const mE = /E([\d.-]+)/.exec(line);
+        const parts = line.split(/\s+/);
+        for (let p = 1; p < parts.length; p++) {
+          const part = parts[p];
+          const code = part[0];
+          const val = parseFloat(part.slice(1));
+          if (code === 'X') x = val;
+          else if (code === 'Y') y = val;
+          else if (code === 'Z') {
+            z = val;
+            if (z !== curLayZ) {
+              curLayZ = Math.round(z * 100) / 100;
+              currentLayer = layerMap.get(curLayZ);
+              if (!currentLayer) {
+                currentLayer = { z: curLayZ, paths: [] };
+                layerMap.set(curLayZ, currentLayer);
+                layers.push(currentLayer);
+              }
+            }
+          } else if (code === 'E') {
+            if (val > 0) ext = true;
+          }
+        }
 
-        if (mX) x = parseFloat(mX[1]);
-        if (mY) y = parseFloat(mY[1]);
-        if (mZ) z = parseFloat(mZ[1]);
-        if (mE && parseFloat(mE[1]) > 0) ext = true;
-
-        if (ext) {
-          addLivePathSegment(curX, curY, curZ, x, y, z);
+        if (ext && (x !== curX || y !== curY)) {
+          if (!currentLayer) {
+            curLayZ = Math.round(curZ * 100) / 100;
+            currentLayer = { z: curLayZ, paths: [] };
+            layerMap.set(curLayZ, currentLayer);
+            layers.push(currentLayer);
+          }
+          currentLayer.paths.push({ x1: curX, y1: curY, z1: curZ, x2: x, y2: y, z2: z, ext: true });
         }
 
         curX = x; curY = y; curZ = z;
       }
     }
 
+    layers.sort((a, b) => a.z - b.z);
     totLayer = layers.length;
+    curLayer = layers.length;
+    if (layers.length > 0) {
+      const topLay = layers[layers.length - 1];
+      if (topLay.paths.length > 0) {
+        const lastP = topLay.paths[topLay.paths.length - 1];
+        targetNozzle.x = lastP.x2;
+        targetNozzle.y = lastP.y2;
+        targetNozzle.z = topLay.z;
+        nozzle.x = targetNozzle.x;
+        nozzle.y = targetNozzle.y;
+        nozzle.z = targetNozzle.z;
+      }
+    }
     updateLayerSlider();
-    toast(`Loaded ${layers.length} G-code layers into 3D view`);
+    fitBed();
+    toast(`3D Visualizer: loaded ${layers.length} layers`);
+  }
+
+  async function loadFromUrl(url) {
+    if (!url) return false;
+    try {
+      toast('📥 Loading G-code for 3D Visualizer…');
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const text = await resp.text();
+      loadGCode(text);
+      return true;
+    } catch (e) {
+      console.warn('GCodeViewer loadFromUrl error:', e);
+      return false;
+    }
   }
 
   return {
     init,
     updatePosition,
     loadGCode,
-    toggleDemo,
+    loadFromUrl,
     fitBed,
     destroy() {
       cancelAnimationFrame(animId);
-      clearInterval(demoTimer);
     }
   };
 })();
