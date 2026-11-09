@@ -30,7 +30,7 @@ SSH into your Raspberry Pi (e.g. `ssh pi@<your-pi-ip>`) and run:
 
 ```bash
 cd ~
-git clone https://github.com/OversizedWizard/KlipperDisplayWeb.git html-git
+git clone -b web-ui https://github.com/OversizedWizard/KlipperDisplayMoonraker.git html-git
 cd html-git
 chmod +x install.sh uninstall.sh
 ./install.sh

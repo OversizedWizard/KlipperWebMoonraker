@@ -31,3 +31,4 @@ fi
 
 sudo nginx -t && (sudo systemctl reload nginx || sudo systemctl restart nginx)
 echo -e "${C_GREEN}✓ Uninstalled Klipper Web UI and reloaded Nginx.${C_RESET}"
+

@@ -194,3 +194,4 @@ else
 fi
 echo -e "• To uninstall or restore old web UI: ${C_AMBER}./uninstall.sh${C_RESET}"
 echo -e "${C_CYAN}==========================================================${C_RESET}\n"
+
