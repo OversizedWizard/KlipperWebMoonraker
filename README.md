@@ -45,6 +45,8 @@ A fast, zero-dependency, mobile- and desktop-responsive Web Interface for **Klip
   - **Z-Offset & Paper Friction Test**, **Manual Dual-Z Motor Trim**, **Bed Screws Guided Leveling**, **Input Shaper (`SHAPER_CALIBRATE`)**, **Probe Accuracy**, **Load Cell Calibration & Tare**, and **PID Autotune**.
 - **📝 Built-in `printer.cfg` Code Editor**:
   - Syntax-highlighted Klipper config editor with section sidebar navigation, search, font-size zoom, and one-click **Save & Restart Klipper**.
+- **📋 System & Service Logs Viewer**:
+  - Dedicated **Logs** sidebar page listing all active and archived Moonraker/Klipper logs (`klippy.log`, `moonraker.log`, `KlipperScreen.log`, `crowsnest.log`, etc.) with interactive viewer, error/warning filter, search, **Download**, and **Print** buttons.
 
 ---
 

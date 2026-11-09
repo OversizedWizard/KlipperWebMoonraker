@@ -225,6 +225,29 @@ class MoonrakerClient{
   async readConfig(){
     if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
     const r=await this._fetch('/server/files/config/printer.cfg');return r.text()}
+  async listLogs(){
+    if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
+    try{
+      const res=await this.get('/server/files/list?root=logs',8000);
+      if(Array.isArray(res))return res;
+    }catch(e){}
+    try{
+      const dir=await this.get('/server/files/directory?path=logs&extended=true',8000);
+      if(dir&&Array.isArray(dir.files))return dir.files.map(f=>({path:f.filename,size:f.size,modified:f.modified,permissions:f.permissions}));
+    }catch(e){}
+    return [];
+  }
+  logDownloadURL(filename){
+    const host=(this.base||'http://192.168.0.99:7125').replace(/\/+$/,'');
+    const clean=String(filename||'').replace(/^\/+/,'');
+    return host+'/server/files/logs/'+clean.split('/').map(encodeURIComponent).join('/');
+  }
+  async readLog(filename,timeout=25000){
+    if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
+    const clean=String(filename||'').replace(/^\/+/,'');
+    const r=await this._fetch('/server/files/logs/'+clean.split('/').map(encodeURIComponent).join('/'),{},timeout);
+    return r.text();
+  }
   async writeConfig(text){
     if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
     const fd=new FormData();

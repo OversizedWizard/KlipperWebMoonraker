@@ -4,9 +4,9 @@ const el=(html)=>{const t=document.createElement('div');t.innerHTML=html.trim();
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(()=>t.style.display='none',2600)}
 const App={pages:{},cur:'',history:[],subStack:null,homedAxes:'',mr:MR};
 const NAV_TOP=[['home','Home'],['files','Files'],['printing','Print'],['spool','Spool'],['calibrate','Calibrate']];
-const NAV_BOTTOM=[['config','Printer.cfg'],['settings','Settings'],['power','Power']];
+const NAV_BOTTOM=[['config','Printer.cfg'],['logs','Logs'],['settings','Settings'],['power','Power']];
 const NAV=[...NAV_TOP,...NAV_BOTTOM];
-const TITLES={home:'Home',files:'Files',printing:'Printing',spool:'Spool',calibrate:'Calibrate',config:'Printer.cfg',settings:'Settings',power:'Power'};
+const TITLES={home:'Home',files:'Files',printing:'Printing',spool:'Spool',calibrate:'Calibrate',config:'Printer.cfg',logs:'System Logs',settings:'Settings',power:'Power'};
 function stat(){return MR.st}
 function updateTopBack(){
   const b=$('#topback');if(!b)return;
@@ -17,7 +17,12 @@ function updateTopBack(){
   b.style.display=(isSub||isModal||hasHist||notHome)?'inline-flex':'none';
 }
 function go(page,isBack=false){
-  if(page===App.cur && !$('#sub').classList.contains('show'))return;
+  if(page===App.cur && !$('#sub').classList.contains('show')){
+    if(page==='logs' && App.pages.logs?.isDetailOpen?.()){
+      App.pages.logs.closeDetail();
+    }
+    return;
+  }
   if($('#sub').classList.contains('show')){
     closeSub(true);
   }
@@ -71,6 +76,10 @@ App.back=function(){
   const s=$('#sub');
   if(s&&s.classList.contains('show')){
     closeSub(false);
+    return;
+  }
+  if(App.cur==='logs' && App.pages.logs?.isDetailOpen?.()){
+    App.pages.logs.closeDetail();
     return;
   }
   while(App.history.length>0){
@@ -213,7 +222,11 @@ const SUB_ROUTES = {
   'sub-delta': () => deltaCalSub(),
   'sub-acc': () => probeAccuracy(),
   'sub-lcw': () => loadCellTest(),
-  'sub-pid': () => pidTune()
+  'sub-pid': () => pidTune(),
+  'sub-log-klippy': () => {
+    go('logs');
+    setTimeout(() => App.pages.logs?.openLog?.({ path: 'klippy.log', size: 158181, modified: Math.floor(Date.now() / 1000) }), 350);
+  }
 };
 window.addEventListener('load',()=>{
   buildShell();
