@@ -216,8 +216,11 @@ select,input{background:#1E293B;border:1px solid #475569;border-radius:8px;color
 .fcard-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:2px 0 4px}
 .fcard-chip{font-size:11px;font-weight:700;color:#94A3B8;background:rgba(255,255,255,.06);padding:2px 7px;border-radius:5px;display:inline-flex;align-items:center;gap:4px}
 .fcard-meta{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:auto}
-.fcard-actions{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07)}
-.fcard-actions .btn{padding:6px 10px;font-size:12px;font-weight:800}
+.fcard-actions{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08)}
+.fcard-sub-actions{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.fcard-sub-actions .btn{padding:5px 8px;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;gap:4px;flex:1;justify-content:center}
+.fcard-main-actions{display:flex;align-items:center;gap:8px}
+.fcard-main-actions .btn{flex:1;padding:7px 10px;font-size:13px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 
 /* Folder Card */
 .fcard.is-dir{background:linear-gradient(135deg,rgba(30,41,59,.45),rgba(15,23,42,.7));border:1.5px dashed rgba(255,255,255,.16)}
@@ -1035,10 +1038,7 @@ select,input{background:#1E293B;border:1px solid #475569;border-radius:8px;color
   .fcard-body {
     padding: 10px;
   }
-  .fcard-actions {
-    flex-wrap: wrap;
-  }
-  .fcard-actions .btn {
+  .fcard-main-actions .btn {
     flex: 1;
     text-align: center;
     justify-content: center;

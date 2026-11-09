@@ -196,15 +196,30 @@ App.pages.files=(()=>{
             <span>${fmtDate(it.mod)}</span>
           </div>
           <div class="fcard-actions">
-            <button class="btn sm fc-load" style="border-color:rgba(0,229,255,.45);color:#00E5FF;font-weight:800;padding:4px 8px" title="Load file ready to print & preview in 3D">📥 Load</button>
-            <button class="btn pri sm grow fc-print" style="font-weight:800">🚀 Print</button>
-            <button class="btn sm fc-info" title="File details">${ICON('info',16)}</button>
-            <button class="btn sm fc-del" title="Delete file" style="color:#EF4444">${ICON('trash',16)}</button>
+            <div class="fcard-sub-actions">
+              <button class="btn sm fc-info" title="File details">${ICON('info',14)} Info</button>
+              <button class="btn sm fc-save" title="Save / Download G-code to computer">${ICON('download',14)} Save</button>
+              <button class="btn sm fc-del" title="Delete file" style="color:#EF4444">${ICON('trash',14)} Delete</button>
+            </div>
+            <div class="fcard-main-actions">
+              <button class="btn sm fc-load" style="border-color:rgba(0,229,255,.5);color:#00E5FF;font-weight:800" title="Load file ready to print & preview in 3D">📥 Load</button>
+              <button class="btn pri sm fc-print" style="font-weight:800" title="Start print immediately">🚀 Print</button>
+            </div>
           </div>
         </div>
       </div>
     `);
 
+    $('.fc-info',card).onclick=e=>{e.stopPropagation();showDetails(full,it);};
+    $('.fc-save',card).onclick=e=>{
+      e.stopPropagation();
+      const a=document.createElement('a');
+      a.href=(MR.base||'')+'/server/files/gcodes/'+encodeURI(full);
+      a.download=it.name;
+      a.click();
+      toast(`💾 Downloading ${it.name}…`);
+    };
+    $('.fc-del',card).onclick=e=>{e.stopPropagation();confirmDelete(it,full);};
     $('.fc-load',card).onclick=e=>{e.stopPropagation();loadFileForPrint(full,it);};
     $('.fc-print',card).onclick=e=>{
       e.stopPropagation();
@@ -213,8 +228,6 @@ App.pages.files=(()=>{
         try{await MR.startPrint(full);go('printing');}catch(err){toast('⚠ Start failed: '+err.message);}
       });
     };
-    $('.fc-info',card).onclick=e=>{e.stopPropagation();showDetails(full,it);};
-    $('.fc-del',card).onclick=e=>{e.stopPropagation();confirmDelete(it,full);};
     card.onclick=()=>showDetails(full,it);
 
     loadThumbAndMeta(full,card);
@@ -263,14 +276,25 @@ App.pages.files=(()=>{
           <span class="mono" style="font-weight:700">${fmtSize(it.size)}</span>
         </div>
         <div class="frow-actions">
-          <button class="btn sm r-load" style="border-color:rgba(0,229,255,.45);color:#00E5FF;font-weight:800;padding:4px 10px" title="Load file ready to print & preview in 3D">📥 Load</button>
-          <button class="btn pri sm r-print" style="font-weight:800">🚀 Print</button>
           <button class="btn sm r-info" title="File details">${ICON('info',16)}</button>
+          <button class="btn sm r-save" title="Save / Download G-code to computer">${ICON('download',16)}</button>
           <button class="btn sm r-del" title="Delete file" style="color:#EF4444">${ICON('trash',16)}</button>
+          <button class="btn sm r-load" style="border-color:rgba(0,229,255,.5);color:#00E5FF;font-weight:800;padding:6px 12px;font-size:12.5px" title="Load file ready to print & preview in 3D">📥 Load</button>
+          <button class="btn pri sm r-print" style="font-weight:800;padding:6px 14px;font-size:12.5px" title="Start print immediately">🚀 Print</button>
         </div>
       </div>
     `);
 
+    $('.r-info',row).onclick=e=>{e.stopPropagation();showDetails(full,it);};
+    $('.r-save',row).onclick=e=>{
+      e.stopPropagation();
+      const a=document.createElement('a');
+      a.href=(MR.base||'')+'/server/files/gcodes/'+encodeURI(full);
+      a.download=it.name;
+      a.click();
+      toast(`💾 Downloading ${it.name}…`);
+    };
+    $('.r-del',row).onclick=e=>{e.stopPropagation();confirmDelete(it,full);};
     $('.r-load',row).onclick=e=>{e.stopPropagation();loadFileForPrint(full,it);};
     $('.r-print',row).onclick=e=>{
       e.stopPropagation();
@@ -279,8 +303,6 @@ App.pages.files=(()=>{
         try{await MR.startPrint(full);go('printing');}catch(err){toast('⚠ Start failed: '+err.message);}
       });
     };
-    $('.r-info',row).onclick=e=>{e.stopPropagation();showDetails(full,it);};
-    $('.r-del',row).onclick=e=>{e.stopPropagation();confirmDelete(it,full);};
     row.onclick=()=>showDetails(full,it);
 
     loadThumbAndMeta(full,row);
@@ -408,6 +430,7 @@ App.pages.files=(()=>{
         <button class="btn danger sm" id="ddel" style="gap:4px">${ICON('trash')} Delete File</button>
         <div class="row" style="gap:8px">
           <button class="btn" id="dc">Close</button>
+          <button class="btn sm" id="dsave" title="Save / Download G-code to computer">${ICON('download')} Save</button>
           <button class="btn sm" id="dload" style="border-color:rgba(0,229,255,.45);color:#00E5FF;font-weight:800;padding:8px 16px" title="Load file ready to print and preview in 3D">📥 LOAD FILE</button>
           <button class="btn pri" id="ds" style="font-weight:800;padding:8px 18px">🚀 START PRINT</button>
         </div>
@@ -417,6 +440,13 @@ App.pages.files=(()=>{
     const close=modal(n);
     $('#dx',n).onclick=$('#dc',n).onclick=close;
     $('#ddel',n).onclick=()=>{close();confirmDelete(it,full);};
+    $('#dsave',n).onclick=()=>{
+      const a=document.createElement('a');
+      a.href=(MR.base||'')+'/server/files/gcodes/'+encodeURI(full);
+      a.download=it.name;
+      a.click();
+      toast(`💾 Downloading ${it.name}…`);
+    };
     $('#dload',n).onclick=()=>{close();loadFileForPrint(full,it);};
     $('#ds',n).onclick=async()=>{
       close();
