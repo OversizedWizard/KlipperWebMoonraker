@@ -964,52 +964,335 @@ App.pages.files=(()=>{
 /* ---- Printing ---- */
 App.pages.printing=(()=>{
   const root=$('#p-printing');let z0=0,babysteps=0,curFileMeta=null;
-  root.innerHTML=`<div class="print-grid">
-   <div class="print-col">
-    <div class="card cam-card"><div class="cam-head"><b class="hico">${CICON('camera')} CAMERA</b><span class="sub" id="camst">connecting…</span><span class="grow"></span><button class="btn sm" id="camsnap" title="Save Camera Snapshot">📸 Snap</button><button class="btn sm" id="camfs" title="Fullscreen & Flip/Rotate">⛶ Expand</button><button class="btn sm" id="camset">⚙</button></div>
-     <div class="cam-box" id="cambox" style="cursor:pointer"><img id="camimg" alt="" crossorigin="anonymous"><div class="cam-empty" id="camempty">No webcam found.<br><small>Tap ⚙ to enter a stream URL</small></div></div></div>
-    <div class="card print-file" style="align-items:flex-start">
-     <img id="pthumb" class="thumb" alt="" style="width:110px;height:110px;border-radius:12px;background:#070B14;border:1px solid rgba(0,229,255,.25);object-fit:contain;flex:none">
-     <div class="fico">${CICON('file')}</div>
-     <div class="grow col" style="min-width:0;gap:3px">
-      <div class="fn pf" id="pfile" style="font-size:16.5px;font-weight:800;color:#F8FAFC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">No print</div>
-      <div class="mono" id="p-layer-line" style="font-size:14.5px;font-weight:800;color:#38BDF8">Layer: 0 / 0</div>
-      <div class="mono" id="p-z-line" style="font-size:14px;font-weight:700;color:#E2E8F0">Z: 0.00 mm</div>
-      <div class="mono" id="p-xy-line" style="font-size:14px;font-weight:700;color:#E2E8F0">X: 0.0   Y: 0.0 mm</div>
-      <div class="mono" id="p-spd-line" style="font-size:14px;font-weight:800;color:#34D399">Speed: 0 mm/s</div>
-      <div class="sub pa" id="pact" style="font-size:12.5px!important;color:#94A3B8;margin-top:1px">Idle</div>
+  root.innerHTML=`
+   <div class="print-custom-bar">
+     <div style="display:flex;align-items:center;gap:8px;color:#94A3B8;font-weight:700">
+       <span class="drag-grip" style="color:#00E5FF;font-size:16px">⠿</span>
+       <span>Customizable Print Layout: drag card headers to rearrange</span>
      </div>
-    </div>
-    <div class="card"><div class="hdr hico" style="margin:0 0 6px">${CICON('offset')} Z ADJUST OFFSET</div><div class="row" style="align-items:baseline"><span class="big" id="pz">+0.000 mm</span><span class="sub grow" id="pbs">Baby steps added: 0</span></div>
-     <div class="grid4" style="margin-top:8px"><button class="btn xl" data-z="-0.05">-0.05</button><button class="btn xl" data-z="-0.01">-0.01</button><button class="btn xl" data-z="0.01">+0.01</button><button class="btn xl" data-z="0.05">+0.05</button></div></div>
+     <button class="btn sm" id="btn-reset-layout" style="font-size:11.5px;padding:4px 10px;border-color:rgba(255,255,255,0.15)">↺ Reset Layout</button>
    </div>
-   <div class="print-col">
-    <div class="card col">
-     <div class="row" style="align-items:center"><span class="pill info pbig" id="pstate">STANDBY</span><span class="grow"></span><span class="pill pbig" id="pzo">Z-Offset --</span></div>
-     <div class="ppct" id="ppct">0%</div>
-     <div class="pbar big"><i id="pfill"></i><span id="pbt"></span></div>
-     <div class="grid3">
-      <div class="tile"><div class="tic">${CICON('clock')}</div><div class="k">ELAPSED</div><div class="vv" id="pel">--</div></div>
-      <div class="tile"><div class="tic">${CICON('hourglass')}</div><div class="k">REMAINING</div><div class="vv" id="prem">--</div></div>
-      <div class="tile"><div class="tic">${CICON('flag')}</div><div class="k">PRINT ETA</div><div class="vv" id="peta">--</div></div>
-     </div>
-     <div class="grid3">
-      <div class="tile"><div class="tic">${CICON('clock')}</div><div class="k">SLICER TOTAL</div><div class="vv" id="psltot" style="color:#38BDF8">--</div></div>
-      <div class="tile"><div class="tic">${CICON('hourglass')}</div><div class="k">SLICER LEFT</div><div class="vv" id="pslrem" style="color:#FBBF24">--</div></div>
-      <div class="tile"><div class="tic">${CICON('flag')}</div><div class="k">SLICER ETA</div><div class="vv" id="psleta" style="color:#C084FC">--</div></div>
-     </div>
+
+   <div class="print-grid">
+    <div class="print-col" id="print-col-1">
+      <!-- 3D G-Code Visualizer Card -->
+      <div class="card print-card gcode-card" id="card-visualizer" data-card-id="visualizer">
+        <div class="card-top-handle" title="Drag to rearrange card">
+          <span class="drag-grip">⠿</span>
+          <b class="card-drag-title">${CICON('speed')} 3D G-CODE VISUALIZER & NOZZLE</b>
+          <span class="grow"></span>
+          <span class="sub" style="font-size:11px;color:#38BDF8;font-weight:700">ROTATABLE 3D VIEW</span>
+        </div>
+        <div id="gcode-container" style="width:100%;height:380px;position:relative"></div>
+      </div>
+
+      <!-- Print Job & Toolhead Info -->
+      <div class="card print-card" id="card-fileinfo" data-card-id="fileinfo" style="display:flex;flex-direction:column;align-items:stretch">
+        <div class="card-top-handle" title="Drag to rearrange card">
+          <span class="drag-grip">⠿</span>
+          <b class="card-drag-title">${CICON('file')} CURRENT PRINT JOB & TOOLHEAD</b>
+          <span class="grow"></span>
+        </div>
+        <div class="print-file" style="width:100%;align-items:flex-start;gap:14px">
+          <img id="pthumb" class="thumb" alt="" style="width:110px;height:110px;border-radius:12px;background:#070B14;border:1px solid rgba(0,229,255,.25);object-fit:contain;flex:none">
+          <div class="fico">${CICON('file')}</div>
+          <div class="grow col" style="min-width:0;gap:3px">
+            <div class="fn pf" id="pfile" style="font-size:16.5px;font-weight:800;color:#F8FAFC;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">No print</div>
+            <div class="mono" id="p-layer-line" style="font-size:14.5px;font-weight:800;color:#38BDF8">Layer: 0 / 0</div>
+            <div class="mono" id="p-z-line" style="font-size:14px;font-weight:700;color:#E2E8F0">Z: 0.00 mm</div>
+            <div class="mono" id="p-xy-line" style="font-size:14px;font-weight:700;color:#E2E8F0">X: 0.0   Y: 0.0 mm</div>
+            <div class="mono" id="p-spd-line" style="font-size:14px;font-weight:800;color:#34D399">Speed: 0 mm/s</div>
+            <div class="sub pa" id="pact" style="font-size:12.5px!important;color:#94A3B8;margin-top:1px">Idle</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Z Adjust Offset Card -->
+      <div class="card print-card" id="card-zoffset" data-card-id="zoffset">
+        <div class="card-top-handle" title="Drag to rearrange card">
+          <span class="drag-grip">⠿</span>
+          <b class="card-drag-title">${CICON('offset')} LIVE Z-OFFSET / BABYSTEPS</b>
+          <span class="grow"></span>
+        </div>
+        <div class="row" style="align-items:baseline">
+          <span class="big" id="pz">+0.000 mm</span>
+          <span class="sub grow" id="pbs">Baby steps added: 0</span>
+        </div>
+        <div class="grid4" style="margin-top:8px">
+          <button class="btn xl" data-z="-0.05">-0.05</button>
+          <button class="btn xl" data-z="-0.01">-0.01</button>
+          <button class="btn xl" data-z="0.01">+0.01</button>
+          <button class="btn xl" data-z="0.05">+0.05</button>
+        </div>
+      </div>
     </div>
-    <div class="grid3" id="pmet">
-     <div class="tile" id="pt-nozzle" title="Tap to adjust Nozzle temperature" style="cursor:pointer;border-color:rgba(255,122,0,.38)"><div class="tic">${CICON('nozzle')}</div><div class="k">NOZZLE <small style="color:#FF7A00;font-size:9px">● TUNE</small></div><div class="vv" id="pm-noz">--</div></div>
-     <div class="tile" id="pt-bed" title="Tap to adjust Bed temperature" style="cursor:pointer;border-color:rgba(0,229,255,.38)"><div class="tic">${CICON('bed')}</div><div class="k">BED <small style="color:#00E5FF;font-size:9px">● TUNE</small></div><div class="vv" id="pm-bed">--</div></div>
-     <div class="tile"><div class="tic">${CICON('layers')}</div><div class="k">LAYER</div><div class="vv" id="pm-lay" style="color:#C084FC">0/0</div></div>
-     <div class="tile"><div class="tic">${CICON('speed')}</div><div class="k">SPEED</div><div class="vv" id="pm-spd">100%</div></div>
-     <div class="tile"><div class="tic">${CICON('flow')}</div><div class="k">FLOW</div><div class="vv" id="pm-flw">100%</div></div>
-     <div class="tile"><div class="tic">${CICON('fan')}</div><div class="k">FAN</div><div class="vv" id="pm-fan">0%</div></div>
+
+    <div class="print-col" id="print-col-2">
+      <!-- Print Progress Card -->
+      <div class="card print-card col" id="card-progress" data-card-id="progress">
+        <div class="card-top-handle" title="Drag to rearrange card">
+          <span class="drag-grip">⠿</span>
+          <b class="card-drag-title">${CICON('hourglass')} PRINT PROGRESS & ESTIMATES</b>
+          <span class="grow"></span>
+          <span class="pill info pbig" id="pstate">STANDBY</span>
+        </div>
+        <div class="row" style="align-items:center">
+          <div class="ppct" id="ppct">0%</div>
+          <span class="grow"></span>
+          <span class="pill pbig" id="pzo">Z-Offset --</span>
+        </div>
+        <div class="pbar big"><i id="pfill"></i><span id="pbt"></span></div>
+        <div class="grid3">
+          <div class="tile"><div class="tic">${CICON('clock')}</div><div class="k">ELAPSED</div><div class="vv" id="pel">--</div></div>
+          <div class="tile"><div class="tic">${CICON('hourglass')}</div><div class="k">REMAINING</div><div class="vv" id="prem">--</div></div>
+          <div class="tile"><div class="tic">${CICON('flag')}</div><div class="k">PRINT ETA</div><div class="vv" id="peta">--</div></div>
+        </div>
+        <div class="grid3" style="margin-top:8px">
+          <div class="tile"><div class="tic">${CICON('clock')}</div><div class="k">SLICER TOTAL</div><div class="vv" id="psltot" style="color:#38BDF8">--</div></div>
+          <div class="tile"><div class="tic">${CICON('hourglass')}</div><div class="k">SLICER LEFT</div><div class="vv" id="pslrem" style="color:#FBBF24">--</div></div>
+          <div class="tile"><div class="tic">${CICON('flag')}</div><div class="k">SLICER ETA</div><div class="vv" id="psleta" style="color:#C084FC">--</div></div>
+        </div>
+      </div>
+
+      <!-- Temperatures & Overrides Card -->
+      <div class="card print-card" id="card-metrics" data-card-id="metrics">
+        <div class="card-top-handle" title="Drag to rearrange card">
+          <span class="drag-grip">⠿</span>
+          <b class="card-drag-title">${CICON('tune')} TEMPERATURES & PRINT OVERRIDES</b>
+          <span class="grow"></span>
+          <span class="sub" style="font-size:11px">TAP TO TUNE</span>
+        </div>
+        <div class="grid3" id="pmet">
+          <div class="tile" id="pt-nozzle" title="Tap to adjust Nozzle temperature" style="cursor:pointer;border-color:rgba(255,122,0,.38)"><div class="tic">${CICON('nozzle')}</div><div class="k">NOZZLE <small style="color:#FF7A00;font-size:9px">● TUNE</small></div><div class="vv" id="pm-noz">--</div></div>
+          <div class="tile" id="pt-bed" title="Tap to adjust Bed temperature" style="cursor:pointer;border-color:rgba(0,229,255,.38)"><div class="tic">${CICON('bed')}</div><div class="k">BED <small style="color:#00E5FF;font-size:9px">● TUNE</small></div><div class="vv" id="pm-bed">--</div></div>
+          <div class="tile"><div class="tic">${CICON('layers')}</div><div class="k">LAYER</div><div class="vv" id="pm-lay" style="color:#C084FC">0/0</div></div>
+          <div class="tile"><div class="tic">${CICON('speed')}</div><div class="k">SPEED</div><div class="vv" id="pm-spd">100%</div></div>
+          <div class="tile"><div class="tic">${CICON('flow')}</div><div class="k">FLOW</div><div class="vv" id="pm-flw">100%</div></div>
+          <div class="tile"><div class="tic">${CICON('fan')}</div><div class="k">FAN</div><div class="vv" id="pm-fan">0%</div></div>
+        </div>
+      </div>
+
+      <!-- Print Actions Card -->
+      <div class="card print-card" id="card-controls" data-card-id="controls">
+        <div class="card-top-handle" title="Drag to rearrange card">
+          <span class="drag-grip">⠿</span>
+          <b class="card-drag-title">${CICON('power')} PRINT ACTIONS & CONTROLS</b>
+          <span class="grow"></span>
+        </div>
+        <div class="grid4" id="pbtns">
+          <button class="btn xl pri" id="ppause">⏸ Pause</button>
+          <button class="btn xl" id="pexclude" style="border-color:rgba(251,191,36,.45);color:#FBBF24" title="Cancel individual failed object during print">🎯 Exclude</button>
+          <button class="btn xl" id="ptune">${ICON('tune',20)} Fine Tune</button>
+          <button class="btn xl danger" id="pcancel">✕ Cancel</button>
+        </div>
+        <div class="grid2" id="pdone" style="display:none">
+          <button class="btn xl green" id="psave">Save Z-Offset</button>
+          <button class="btn xl pri" id="phome">Return Home</button>
+        </div>
+      </div>
+
+      <!-- Camera Monitor Card -->
+      <div class="card print-card cam-card" id="card-camera" data-card-id="camera">
+        <div class="card-top-handle" title="Drag to rearrange card">
+          <span class="drag-grip">⠿</span>
+          <b class="card-drag-title">${CICON('camera')} WEBCAM MONITOR</b>
+          <span class="sub" id="camst">connecting…</span>
+          <span class="grow"></span>
+          <button class="btn sm" id="camsnap" title="Save Camera Snapshot">📸 Snap</button>
+          <button class="btn sm" id="camfs" title="Fullscreen & Flip/Rotate">⛶ Expand</button>
+          <button class="btn sm" id="camset">⚙</button>
+        </div>
+        <div class="cam-box" id="cambox" style="cursor:pointer">
+          <img id="camimg" alt="" crossorigin="anonymous">
+          <div class="cam-empty" id="camempty">No webcam found.<br><small>Tap ⚙ to enter a stream URL</small></div>
+        </div>
+      </div>
     </div>
-    <div class="grid4" id="pbtns"><button class="btn xl pri" id="ppause">⏸ Pause</button><button class="btn xl" id="pexclude" style="border-color:rgba(251,191,36,.45);color:#FBBF24" title="Cancel individual failed object during print">🎯 Exclude</button><button class="btn xl" id="ptune">${ICON('tune',20)} Fine Tune</button><button class="btn xl danger" id="pcancel">✕ Cancel</button></div>
-    <div class="grid2" id="pdone" style="display:none"><button class="btn xl green" id="psave">Save Z-Offset</button><button class="btn xl pri" id="phome">Return Home</button></div>
-   </div></div>`;
+   </div>`;
+
+  // Initialize drag & drop and card ordering
+  function initCardDnD() {
+    const col1 = $('#print-col-1', root);
+    const col2 = $('#print-col-2', root);
+    const cards = root.querySelectorAll('.print-card');
+
+    function saveLayout() {
+      const c1 = Array.from(col1.children).filter(c=>c.dataset?.cardId).map(c=>c.dataset.cardId);
+      const c2 = Array.from(col2.children).filter(c=>c.dataset?.cardId).map(c=>c.dataset.cardId);
+      localStorage.setItem('klipper_print_layout_v2', JSON.stringify({ col1: c1, col2: c2 }));
+    }
+
+    function applySavedLayout() {
+      let layout = null;
+      try {
+        const raw = localStorage.getItem('klipper_print_layout_v2');
+        if (raw) layout = JSON.parse(raw);
+      } catch (e) {}
+
+      if (!layout || !layout.col1 || !layout.col2) {
+        layout = {
+          col1: ['visualizer', 'fileinfo', 'zoffset'],
+          col2: ['progress', 'metrics', 'controls', 'camera']
+        };
+      }
+
+      const cardMap = {};
+      cards.forEach(c => cardMap[c.dataset.cardId] = c);
+
+      layout.col1.forEach(id => { if (cardMap[id]) col1.appendChild(cardMap[id]); });
+      layout.col2.forEach(id => { if (cardMap[id]) col2.appendChild(cardMap[id]); });
+      cards.forEach(c => {
+        if (!c.parentElement) col1.appendChild(c);
+      });
+    }
+
+    applySavedLayout();
+
+    $('#btn-reset-layout', root).onclick = () => {
+      localStorage.removeItem('klipper_print_layout_v2');
+      applySavedLayout();
+      toast('Print layout reset to default');
+    };
+
+    let draggedCard = null;
+
+    cards.forEach(card => {
+      const handle = card.querySelector('.card-top-handle');
+      if (!handle) return;
+
+      handle.addEventListener('mousedown', () => {
+        card.setAttribute('draggable', 'true');
+      });
+      handle.addEventListener('mouseup', () => {
+        card.setAttribute('draggable', 'false');
+      });
+
+      card.addEventListener('dragstart', (e) => {
+        draggedCard = card;
+        card.classList.add('is-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', card.dataset.cardId);
+      });
+
+      card.addEventListener('dragend', () => {
+        card.setAttribute('draggable', 'false');
+        card.classList.remove('is-dragging');
+        cards.forEach(c => c.classList.remove('drag-over-top', 'drag-over-bottom'));
+        col1.classList.remove('col-drag-over');
+        col2.classList.remove('col-drag-over');
+        draggedCard = null;
+        saveLayout();
+      });
+
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (!draggedCard || draggedCard === card) return;
+        const rect = card.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (e.clientY < midY) {
+          card.classList.add('drag-over-top');
+          card.classList.remove('drag-over-bottom');
+        } else {
+          card.classList.add('drag-over-bottom');
+          card.classList.remove('drag-over-top');
+        }
+      });
+
+      card.addEventListener('dragleave', () => {
+        card.classList.remove('drag-over-top', 'drag-over-bottom');
+      });
+
+      card.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (!draggedCard || draggedCard === card) return;
+        const rect = card.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (e.clientY < midY) {
+          card.parentNode.insertBefore(draggedCard, card);
+        } else {
+          card.parentNode.insertBefore(draggedCard, card.nextSibling);
+        }
+        card.classList.remove('drag-over-top', 'drag-over-bottom');
+        saveLayout();
+      });
+
+      // Touch / pointer drag support for tablets & touchscreens
+      let touchStartY = 0;
+      let isTouching = false;
+      handle.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        touchStartY = e.touches[0].clientY;
+        isTouching = true;
+      }, { passive: true });
+
+      handle.addEventListener('touchmove', (e) => {
+        if (!isTouching || e.touches.length !== 1) return;
+        const cy = e.touches[0].clientY;
+        const cx = e.touches[0].clientX;
+        if (Math.abs(cy - touchStartY) > 15) {
+          card.classList.add('is-dragging');
+          const target = document.elementFromPoint(cx, cy)?.closest('.print-card');
+          cards.forEach(c => c.classList.remove('drag-over-top', 'drag-over-bottom'));
+          if (target && target !== card) {
+            const rect = target.getBoundingClientRect();
+            if (cy < rect.top + rect.height / 2) {
+              target.classList.add('drag-over-top');
+            } else {
+              target.classList.add('drag-over-bottom');
+            }
+          }
+        }
+      }, { passive: true });
+
+      handle.addEventListener('touchend', (e) => {
+        if (!isTouching) return;
+        isTouching = false;
+        card.classList.remove('is-dragging');
+        const touch = e.changedTouches[0];
+        if (touch) {
+          const target = document.elementFromPoint(touch.clientX, touch.clientY)?.closest('.print-card');
+          if (target && target !== card) {
+            const rect = target.getBoundingClientRect();
+            if (touch.clientY < rect.top + rect.height / 2) {
+              target.parentNode.insertBefore(card, target);
+            } else {
+              target.parentNode.insertBefore(card, target.nextSibling);
+            }
+            saveLayout();
+          }
+        }
+        cards.forEach(c => c.classList.remove('drag-over-top', 'drag-over-bottom'));
+      });
+    });
+
+    [col1, col2].forEach(col => {
+      col.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        col.classList.add('col-drag-over');
+      });
+      col.addEventListener('dragleave', (e) => {
+        if (!col.contains(e.relatedTarget)) {
+          col.classList.remove('col-drag-over');
+        }
+      });
+      col.addEventListener('drop', (e) => {
+        e.preventDefault();
+        col.classList.remove('col-drag-over');
+        if (draggedCard && !col.contains(draggedCard)) {
+          col.appendChild(draggedCard);
+          saveLayout();
+        }
+      });
+    });
+  }
+
+  initCardDnD();
+
+  // Initialize G-Code 3D Visualizer
+  if (window.GCodeViewer) {
+    const gcBox = $('#gcode-container', root);
+    if (gcBox) window.GCodeViewer.init(gcBox);
+  }
   $('#pt-nozzle',root).onclick=()=>preheat('nozzle');
   $('#pt-bed',root).onclick=()=>preheat('bed');
   (function cam(){
@@ -1201,8 +1484,18 @@ App.pages.printing=(()=>{
     if(gm.homing_origin){z0=gm.homing_origin[2];upd();$('#pzo').textContent='Z-Offset '+z0.toFixed(3)}
     $('#pbtns').style.display=done?'none':'grid';$('#pdone').style.display=done?'grid':'none';
     $('#ppause').textContent=state==='paused'?'▶ Resume':'⏸ Pause';
+
+    const isExt = (state === 'printing') && ((gm.extrude_factor || 1) > 0);
+    if (window.GCodeViewer) {
+      window.GCodeViewer.updatePosition(xPos, yPos, zPos, liveVel, isExt, curLayer, totLayer);
+    }
   });
-  return{show(){},onState(st){}};
+  return{
+    show(){
+      if (window.GCodeViewer) window.GCodeViewer.fitBed();
+    },
+    onState(st){}
+  };
 })();
 function fineTune(){
   const s=stat(),gm=s.gcode_move||{};
