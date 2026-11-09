@@ -53,7 +53,17 @@ window.GCodeViewer = (function() {
   let showTravel = true;
   let showGrid = true;
   let showNozzle = true;
-  let layerFilter = 0; // 0 = show up to current layer; >0 = specific layer only
+  let layerFilter = 0; // 0 = show all up to top layer; >0 = show all up to selected layer
+
+  // Simulation state (for simulating G-code when not printing)
+  let isSimulating = false;
+  let simPaused = false;
+  let simLayerIdx = 0;
+  let simPathIdx = 0;
+  const speedOptions = [2, 5, 10, 25, 50];
+  let speedIdx = 2; // default: 10x
+  let simSpeedMultiplier = speedOptions[speedIdx];
+  let isPrinterBusy = false;
 
   function init(containerEl) {
     if (!containerEl) return;
@@ -86,6 +96,10 @@ window.GCodeViewer = (function() {
 
         <!-- Bottom Controls & Layer Slider -->
         <div class="gcode-bot-bar" style="position:absolute;bottom:8px;left:8px;right:8px;display:flex;align-items:center;gap:8px;background:rgba(15,23,42,0.85);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.12);padding:6px 12px;border-radius:10px;z-index:2">
+          <button class="btn sm pri" id="gc-btn-play" title="Simulate G-Code printing" style="padding:4px 11px;font-size:11px;font-weight:800;background:linear-gradient(135deg,#00E5FF,#2563EB);border:none;box-shadow:0 0 10px rgba(0,229,255,.3);display:flex;align-items:center;gap:4px">
+            <span id="gc-play-icon">▶</span> <span id="gc-play-text">Play</span>
+          </button>
+          <button class="btn sm" id="gc-btn-speed" title="Simulation Speed (tap to change)" style="padding:3px 7px;font-size:10.5px;font-weight:800;border-color:rgba(0,229,255,.3);color:#00E5FF">10x</button>
           <span style="font-size:11px;font-weight:800;color:#94A3B8;white-space:nowrap">LAYER:</span>
           <input type="range" id="gc-layer-slider" min="0" max="0" value="0" style="flex:1;cursor:pointer;accent-color:#00E5FF;height:6px">
           <span id="gc-slider-val" class="mono" style="font-size:11.5px;font-weight:800;color:#00E5FF;min-width:55px;text-align:right">ALL</span>
@@ -144,11 +158,19 @@ window.GCodeViewer = (function() {
       followNozzle = !followNozzle;
       updateFollowBtn();
     });
+    container.querySelector('#gc-btn-play')?.addEventListener('click', () => {
+      toggleSimulation();
+    });
+    container.querySelector('#gc-btn-speed')?.addEventListener('click', () => {
+      toggleSpeed();
+    });
     container.querySelector('#gc-btn-clear')?.addEventListener('click', () => {
+      stopSimulation();
       layers = [];
       layerMap.clear();
       activeLivePath = [];
       updateLayerSlider();
+      updatePlayBtn();
       toast('Visualizer paths cleared');
     });
 
@@ -157,6 +179,10 @@ window.GCodeViewer = (function() {
       layerFilter = parseInt(e.target.value, 10);
       const valTxt = container.querySelector('#gc-slider-val');
       if (valTxt) valTxt.textContent = layerFilter === 0 ? 'ALL' : `${layerFilter}`;
+      if (isSimulating && layerFilter > 0) {
+        simLayerIdx = Math.max(0, Math.min(layers.length - 1, layerFilter - 1));
+        simPathIdx = 0;
+      }
     });
 
     // Mouse Controls
@@ -270,6 +296,100 @@ window.GCodeViewer = (function() {
     zoom = Math.min(cw / 240, ch / 210);
     panX = 0;
     panY = 10;
+  }
+
+  // Simulation Controls & Speed
+  function setPrinting(printing) {
+    isPrinterBusy = !!printing;
+    if (isPrinterBusy && isSimulating) {
+      stopSimulation();
+    }
+    updatePlayBtn();
+  }
+
+  function toggleSimulation() {
+    if (isPrinterBusy) {
+      toast('Cannot simulate while printer is actively printing');
+      return;
+    }
+    if (!layers.length) {
+      toast('Load a G-code file first to simulate print');
+      return;
+    }
+
+    if (!isSimulating) {
+      isSimulating = true;
+      simPaused = false;
+      if (simLayerIdx >= layers.length || (layerFilter === 0 && simLayerIdx === 0 && simPathIdx === 0)) {
+        simLayerIdx = 0;
+        simPathIdx = 0;
+      } else if (layerFilter > 0) {
+        simLayerIdx = Math.max(0, Math.min(layers.length - 1, layerFilter - 1));
+        simPathIdx = 0;
+      }
+      toast('▶ Simulating G-code print…');
+    } else if (simPaused) {
+      simPaused = false;
+      toast('▶ Resumed simulation');
+    } else {
+      simPaused = true;
+      toast('⏸ Paused simulation');
+    }
+    updatePlayBtn();
+  }
+
+  function stopSimulation() {
+    isSimulating = false;
+    simPaused = false;
+    isExtruding = false;
+    updatePlayBtn();
+  }
+
+  function toggleSpeed() {
+    speedIdx = (speedIdx + 1) % speedOptions.length;
+    simSpeedMultiplier = speedOptions[speedIdx];
+    const spdBtn = container?.querySelector('#gc-btn-speed');
+    if (spdBtn) spdBtn.textContent = `${simSpeedMultiplier}x`;
+    toast(`Simulation speed: ${simSpeedMultiplier}x`);
+  }
+
+  function updatePlayBtn() {
+    const playBtn = container?.querySelector('#gc-btn-play');
+    const playIcon = container?.querySelector('#gc-play-icon');
+    const playTxt = container?.querySelector('#gc-play-text');
+    if (!playBtn) return;
+
+    if (isPrinterBusy) {
+      playBtn.disabled = true;
+      playBtn.style.opacity = '0.55';
+      playBtn.style.cursor = 'not-allowed';
+      playBtn.style.background = 'rgba(255,255,255,0.08)';
+      playBtn.style.boxShadow = 'none';
+      if (playIcon) playIcon.textContent = '●';
+      if (playTxt) playTxt.textContent = 'Printing';
+      return;
+    }
+
+    playBtn.disabled = false;
+    playBtn.style.opacity = '1';
+    playBtn.style.cursor = 'pointer';
+
+    if (isSimulating && !simPaused) {
+      if (playIcon) playIcon.textContent = '⏸';
+      if (playTxt) playTxt.textContent = 'Pause';
+      playBtn.style.background = 'linear-gradient(135deg,#F59E0B,#D97706)';
+      playBtn.style.boxShadow = '0 0 10px rgba(245,158,11,.4)';
+    } else if (isSimulating && simPaused) {
+      if (playIcon) playIcon.textContent = '▶';
+      if (playTxt) playTxt.textContent = 'Resume';
+      playBtn.style.background = 'linear-gradient(135deg,#00E5FF,#2563EB)';
+      playBtn.style.boxShadow = '0 0 10px rgba(0,229,255,.3)';
+    } else {
+      if (playIcon) playIcon.textContent = '▶';
+      if (playTxt) playTxt.textContent = 'Play';
+      playBtn.style.background = 'linear-gradient(135deg,#00E5FF,#2563EB)';
+      playBtn.style.boxShadow = '0 0 10px rgba(0,229,255,.3)';
+    }
   }
 
   // 3D Projection Math
@@ -387,6 +507,54 @@ window.GCodeViewer = (function() {
     const cx = w / 2;
     const cy = h / 2 + 20;
 
+    // Simulation step update
+    if (isSimulating && !simPaused && layers.length > 0) {
+      const curLay = layers[simLayerIdx];
+      if (curLay && curLay.paths.length > 0) {
+        simPathIdx = Math.min(curLay.paths.length, simPathIdx + simSpeedMultiplier);
+
+        const targetP = curLay.paths[Math.min(curLay.paths.length - 1, Math.max(0, simPathIdx - 1))];
+        if (targetP) {
+          targetNozzle.x = targetP.x2;
+          targetNozzle.y = targetP.y2;
+          targetNozzle.z = curLay.z;
+          isExtruding = !!targetP.ext;
+        }
+
+        if (simPathIdx >= curLay.paths.length) {
+          simLayerIdx++;
+          simPathIdx = 0;
+          if (simLayerIdx >= layers.length) {
+            isSimulating = false;
+            simPaused = false;
+            isExtruding = false;
+            updatePlayBtn();
+            toast('✓ G-code simulation finished');
+          }
+        }
+
+        curLayer = Math.min(layers.length, simLayerIdx + 1);
+        totLayer = layers.length;
+        liveSpeed = Math.round(50 * (simSpeedMultiplier / 5));
+
+        const xEl = container?.querySelector('#gc-x');
+        const yEl = container?.querySelector('#gc-y');
+        const zEl = container?.querySelector('#gc-z');
+        const lEl = container?.querySelector('#gc-lay-txt');
+        const sEl = container?.querySelector('#gc-spd-txt');
+        if (xEl) xEl.textContent = targetNozzle.x.toFixed(1);
+        if (yEl) yEl.textContent = targetNozzle.y.toFixed(1);
+        if (zEl) zEl.textContent = targetNozzle.z.toFixed(2);
+        if (lEl) lEl.textContent = `${curLayer} / ${totLayer}`;
+        if (sEl) sEl.textContent = `${liveSpeed} mm/s`;
+
+        const slider = container?.querySelector('#gc-layer-slider');
+        if (slider) slider.value = `${curLayer}`;
+        const valTxt = container?.querySelector('#gc-slider-val');
+        if (valTxt) valTxt.textContent = `${curLayer}/${totLayer}`;
+      }
+    }
+
     // Follow Nozzle Camera offset
     if (followNozzle) {
       const pN = project(targetNozzle.x, targetNozzle.y, targetNozzle.z, cx, cy);
@@ -395,9 +563,9 @@ window.GCodeViewer = (function() {
     }
 
     // Smooth nozzle position interpolation
-    nozzle.x += (targetNozzle.x - nozzle.x) * 0.25;
-    nozzle.y += (targetNozzle.y - nozzle.y) * 0.25;
-    nozzle.z += (targetNozzle.z - nozzle.z) * 0.25;
+    nozzle.x += (targetNozzle.x - nozzle.x) * (isSimulating ? 0.45 : 0.25);
+    nozzle.y += (targetNozzle.y - nozzle.y) * (isSimulating ? 0.45 : 0.25);
+    nozzle.z += (targetNozzle.z - nozzle.z) * (isSimulating ? 0.45 : 0.25);
 
     // 1. Draw 3D Build Plate
     if (showGrid) {
@@ -503,31 +671,42 @@ window.GCodeViewer = (function() {
     ctx.fillText(`${bedW}mm`, pEnd.x + 4, pEnd.y + 4);
   }
 
-  // 2. Toolpath Rendering
+  // 2. Toolpath Rendering - leaves all previous layers there when drawing a layer
   function drawToolpaths(cx, cy) {
     if (!layers.length) return;
 
-    const visibleLayers = layerFilter === 0
-      ? layers
-      : layers.filter((_, idx) => idx + 1 === layerFilter);
+    let maxLayerIdx;
+    let activePathLimit = null;
+
+    if (isSimulating) {
+      maxLayerIdx = Math.min(layers.length - 1, simLayerIdx);
+      activePathLimit = simPathIdx;
+    } else if (layerFilter > 0) {
+      // User scrubbed slider: leave all previous layers underneath it!
+      maxLayerIdx = Math.min(layers.length - 1, layerFilter - 1);
+    } else {
+      // layerFilter === 0: show ALL layers
+      maxLayerIdx = layers.length - 1;
+    }
 
     const totalL = layers.length;
 
-    visibleLayers.forEach((lay, lIdx) => {
-      const isCurrent = lIdx === visibleLayers.length - 1;
+    for (let lIdx = 0; lIdx <= maxLayerIdx; lIdx++) {
+      const lay = layers[lIdx];
+      const isTopActive = (lIdx === maxLayerIdx);
       const progressRatio = totalL > 1 ? lIdx / totalL : 1;
 
-      // Color gradient by layer height
-      let strokeCol = isCurrent
+      // Color gradient: base layers have depth gradient; top/active layer is highlighted in bright neon cyan #00E5FF
+      let strokeCol = isTopActive
         ? '#00E5FF'
-        : `hsl(${210 + progressRatio * 70}, 85%, ${45 + progressRatio * 20}%)`;
+        : `hsl(${210 + progressRatio * 60}, 80%, ${38 + progressRatio * 20}%)`;
 
       ctx.strokeStyle = strokeCol;
-      ctx.lineWidth = isCurrent ? 2.0 : 1.2;
+      ctx.lineWidth = isTopActive ? 2.2 : 1.3;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
-      if (isCurrent) {
+      if (isTopActive) {
         ctx.shadowColor = '#00E5FF';
         ctx.shadowBlur = 6;
       } else {
@@ -535,15 +714,20 @@ window.GCodeViewer = (function() {
       }
 
       ctx.beginPath();
-      lay.paths.forEach((p) => {
-        if (!p.ext && !showTravel) return;
+      const pathLimit = (isTopActive && activePathLimit !== null)
+        ? Math.min(lay.paths.length, activePathLimit)
+        : lay.paths.length;
+
+      for (let pIdx = 0; pIdx < pathLimit; pIdx++) {
+        const p = lay.paths[pIdx];
+        if (!p.ext && !showTravel) continue;
         const p1 = project(p.x1, p.y1, p.z1, cx, cy);
         const p2 = project(p.x2, p.y2, p.z2, cx, cy);
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
-      });
+      }
       ctx.stroke();
-    });
+    }
 
     ctx.shadowBlur = 0;
   }
@@ -756,7 +940,12 @@ window.GCodeViewer = (function() {
         nozzle.z = targetNozzle.z;
       }
     }
+    stopSimulation();
+    simLayerIdx = 0;
+    simPathIdx = 0;
+    layerFilter = 0;
     updateLayerSlider();
+    updatePlayBtn();
     fitBed();
     toast(`3D Visualizer: loaded ${layers.length} layers`);
   }
@@ -782,8 +971,12 @@ window.GCodeViewer = (function() {
     loadGCode,
     loadFromUrl,
     fitBed,
+    setPrinting,
+    toggleSimulation,
+    stopSimulation,
     destroy() {
       cancelAnimationFrame(animId);
+      stopSimulation();
     }
   };
 })();

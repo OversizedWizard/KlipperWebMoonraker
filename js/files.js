@@ -1690,6 +1690,7 @@ App.pages.printing=(()=>{
 
     const isExt = (state === 'printing') && ((gm.extrude_factor || 1) > 0);
     if (window.GCodeViewer) {
+      window.GCodeViewer.setPrinting(state === 'printing');
       window.GCodeViewer.updatePosition(xPos, yPos, zPos, liveVel, isExt, curLayer, totLayer);
     }
     updateLoadedUI(state);
