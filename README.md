@@ -30,8 +30,8 @@ SSH into your Raspberry Pi (e.g. `ssh pi@<your-pi-ip>`) and run:
 
 ```bash
 cd ~
-git clone -b web-ui https://github.com/OversizedWizard/KlipperDisplayMoonraker.git html-git
-cd html-git
+git clone https://github.com/OversizedWizard/KlipperWebMoonraker.git
+cd KlipperWebMoonraker
 chmod +x install.sh uninstall.sh
 ./install.sh
 ```
@@ -39,9 +39,9 @@ chmod +x install.sh uninstall.sh
 *(Or if copying the `html-git` folder directly to your Pi via SCP:)*
 
 ```bash
-scp -r html-git pi@<your-pi-ip>:~/
+scp -r html-git pi@<your-pi-ip>:~/KlipperWebMoonraker
 ssh pi@<your-pi-ip>
-cd ~/html-git
+cd ~/KlipperWebMoonraker
 chmod +x install.sh uninstall.sh
 ./install.sh
 ```
@@ -78,7 +78,7 @@ Would you like to replace the existing web interface with the new one? (y/n) [de
 To pull the latest updates and replace the installed files on your Raspberry Pi:
 
 ```bash
-cd ~/html-git
+cd ~/KlipperWebMoonraker
 git pull
 ./install.sh
 ```
@@ -90,7 +90,7 @@ git pull
 To remove **Klipper Web UI** and restore your backed-up `Mainsail` or `Fluidd` configuration:
 
 ```bash
-cd ~/html-git
+cd ~/KlipperWebMoonraker
 ./uninstall.sh
 ```
 
