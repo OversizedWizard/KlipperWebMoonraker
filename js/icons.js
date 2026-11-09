@@ -1,0 +1,47 @@
+/* Compact stroke-style SVG icon set (28 names used by the UI). */
+(function(){
+const S=(d,extra='')=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
+const I={
+home:S('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/>'),
+files:S('<path d="M3 6a2 2 0 012-2h5l2 2h7a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>'),
+printing:S('<rect x="3" y="3" width="18" height="6" rx="1"/><path d="M6 9v4h12V9"/><path d="M8 13v4l4 4 4-4v-4"/>'),
+spool:S('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/>'),
+calibrate:S('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/><path d="M12 3v2M21 12h-2M12 21v-2M3 12h2"/>'),
+settings:S('<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 00-2-1.2L14 3h-4l-.6 2.7a7 7 0 00-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 005 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 002 1.2L10 21h4l.6-2.7a7 7 0 002-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/>'),
+power:S('<path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1011.4 0"/>'),
+nozzle:S('<rect x="7" y="2" width="10" height="8" rx="1"/><path d="M8 10l2 6h4l2-6"/><path d="M12 16v4"/>'),
+bed:S('<path d="M3 15h18v3H3z"/><path d="M7 12c0-2 2-2 2-4M12 12c0-2 2-2 2-4M17 12c0-2 2-2 2-4" />'),
+probe:S('<path d="M12 2v10"/><path d="M8 12h8l-4 8z"/><path d="M4 22h16"/>'),
+mesh:S('<path d="M3 5h18M3 12h18M3 19h18M5 3v18M12 3v18M19 3v18"/>'),
+zoffset:S('<path d="M12 3v14"/><path d="M8 13l4 4 4-4"/><path d="M4 21h16"/>'),
+screws:S('<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="12" cy="12" r="2"/>'),
+gantry:S('<path d="M3 8h18"/><path d="M5 4v16M19 4v16"/><rect x="9" y="8" width="6" height="5"/>'),
+shaper:S('<path d="M2 12h3l2-6 3 12 3-12 3 12 2-6h4"/>'),
+twist:S('<path d="M4 6c6 0 6 6 12 6s4-6 4-6"/><path d="M4 18c6 0 6-6 12-6"/>'),
+endstop:S('<rect x="3" y="9" width="10" height="6" rx="1"/><path d="M13 12h6l2-3M13 12h8"/>'),
+delta:S('<path d="M12 3l9 16H3z"/>'),
+sun:S('<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>'),
+reload:S('<path d="M20 11a8 8 0 10-2.3 6"/><path d="M20 4v7h-7"/>'),
+restart:S('<path d="M4 12a8 8 0 018-8 8 8 0 016 2.7"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 01-8 8 8 8 0 01-6-2.7"/><path d="M4 20v-5h5"/>'),
+firmware:S('<rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>'),
+tune:S('<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'),
+up:S('<path d="M12 19V5M5 12l7-7 7 7"/>'),
+down:S('<path d="M12 5v14M5 12l7 7 7-7"/>'),
+left:S('<path d="M19 12H5M12 5l-7 7 7 7"/>'),
+right:S('<path d="M5 12h14M12 5l7 7-7 7"/>'),
+upload:S('<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>'),
+trash:S('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
+search:S('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'),
+folder:S('<path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>'),
+folderadd:S('<path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/>'),
+grid:S('<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>'),
+list:S('<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>'),
+info:S('<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>'),
+cube:S('<path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>'),
+clock:S('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'),
+homeaxis:S('<path d="M3 11l9-8 9 8"/><path d="M6 10v10h12V10"/>'),
+config:S('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M10 13l-2 2 2 2"/><path d="M14 13l2 2-2 2"/>'),
+};
+window.ICON=(n,sz)=>sz?I[n].replace('<svg','<svg style="width:'+sz+'px;height:'+sz+'px"'):(I[n]||'');
+})();
+
