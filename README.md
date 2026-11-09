@@ -1,156 +1,38 @@
-# 🌐 Klipper Touch Web UI
+# Klipper Screen – Web UI
 
-A fast, zero-dependency, mobile- and desktop-responsive Web Interface for **Klipper 3D Printers** and **Moonraker** — matching the **Klipper Touch Display** experience in any phone, tablet, or PC browser.
+HTML/CSS/JS recreation of the Klipper Screen app. No build step, no dependencies. Talks directly to Moonraker.
 
----
-
-## 📸 Web Interface Screenshots (Desktop & Mobile)
-
-| **Operator Home Dashboard** | **Interactive 3D Bed Mesh** |
-|:---:|:---:|
-| ![Operator Home Dashboard](assets/screenshots/01_home_dashboard.png) | ![Interactive 3D Bed Mesh](assets/screenshots/02_3d_bed_mesh.png) |
-| *Live temperatures, collapsible/rearrangeable cards, load-cell force gauge, XY/Z jog pad & G-code console* | *Touch/mouse drag-to-rotate 3D build plate with coloured height spots, topography & min/max callouts* |
-
-| **Pro G-Code File Manager** | **Visual Spool Showcase & Manager** |
-|:---:|:---:|
-| ![Pro G-Code File Manager](assets/screenshots/03_files_manager.png) | ![Visual Spool Showcase & Manager](assets/screenshots/04_spool_manager.png) |
-| *Slicer thumbnail previews, drag-and-drop multi-file upload dropzone, search & print confirmation* | *Tinted filament spool card (tap card to configure material, colour & temps), load/unload & manual extrude* |
-
-| **Visual Calibration Hub** | **Built-in `printer.cfg` Code Editor** |
-|:---:|:---:|
-| ![Visual Calibration Hub](assets/screenshots/05_calibrate_hub.png) | ![Built-in printer.cfg Code Editor](assets/screenshots/06_config_editor.png) |
-| *Z-Offset paper test, manual Dual-Z trim, bed screws, input shaper, probe accuracy & PID autotune* | *Syntax-highlighted config editor with section navigation, search, font zoom & one-click Save & Restart* |
-
-| **Manual Dual-Z Motor Trim** | **Tap-to-Edit Spool Settings Modal** |
-|:---:|:---:|
-| ![Manual Dual-Z Motor Trim](assets/screenshots/07_dual_z_trim.png) | ![Tap-to-Edit Spool Settings Modal](assets/screenshots/08_spool_settings.png) |
-| *Independent leadscrew alignment with live gantry tilt diagram and CW/CCW turn guides* | *One-tap material presets (`PLA`, `PETG`, `ABS`, `ASA`, `TPU`, etc.), 16 colours & temperature steppers* |
-
----
-
-## ✨ Features
-
-- **📱 Mobile & Desktop Responsive**:
-  - Automatically adapts to smartphones (bottom navigation bar, full-width cards, touch-optimized controls) and desktop browsers (3-column rearrangeable & collapsible operator dashboard).
-- **🧭 Interactive 3D Bed Mesh Visualizer**:
-  - Touch / finger drag rotation (`3D Plate + Spots`, `3D Topography`, `2D Grid`), spot height inspection tooltips, and live probing progress.
-- **🛏️ One-Tap Bed Levelling Mode Selector (Normal / KAMP / Off)**:
-  - Switch between **Normal Full Bed Mesh**, **KAMP Adaptive Mesh** (with `SMART_PARK` and `LINE_PURGE`), or **No Levelling** directly from the Home screen — automatically updates `printer.cfg` (`PRINT_START`).
-- **🧵 Visual Spool Showcase & Tap-to-Edit Settings**:
-  - Custom-tinted filament spool showcase card; tap the Spool Card to open the material preset (`PLA`, `PETG`, `ABS`, `ASA`, `TPU`, `Nylon`, `PC`, etc.), 16-colour palette, and nozzle/bed temperature popup.
-  - Procedural **Load / Unload Filament** workflow with live extruder velocity sync and filament runout sensor detection.
-- **📂 Pro G-Code File Manager**:
-  - Grid and List views with embedded slicer thumbnails, folder navigation, drag-and-drop multi-file upload, and print confirmation preview.
-- **🎯 Full Visual Calibration Suite**:
-  - **Z-Offset & Paper Friction Test**, **Manual Dual-Z Motor Trim**, **Bed Screws Guided Leveling**, **Input Shaper (`SHAPER_CALIBRATE`)**, **Probe Accuracy**, **Load Cell Calibration & Tare**, and **PID Autotune**.
-- **📝 Built-in `printer.cfg` Code Editor**:
-  - Syntax-highlighted Klipper config editor with section sidebar navigation, search, font-size zoom, and one-click **Save & Restart Klipper**.
-- **📋 System & Service Logs Viewer**:
-  - Dedicated **Logs** sidebar page listing all active and archived Moonraker/Klipper logs (`klippy.log`, `moonraker.log`, `KlipperScreen.log`, `crowsnest.log`, etc.) with interactive viewer, error/warning filter, search, **Download**, and **Print** buttons.
-
----
-
-## 📦 Installation on Raspberry Pi
-
-SSH into your Raspberry Pi (e.g. `ssh pi@<your-pi-ip>`) and run:
-
+## Install on the Pi (replaces Mainsail/Fluidd on port 80)
 ```bash
-cd ~
-git clone https://github.com/OversizedWizard/KlipperWebMoonraker.git
-cd KlipperWebMoonraker
-chmod +x install.sh uninstall.sh
-./install.sh
+scp -r html pi@<pi-ip>:~/
+ssh pi@<pi-ip>
+sudo bash ~/html/install_web_ui.sh
 ```
+Existing nginx sites are backed up to `/etc/nginx/klipper-screen-backup-*`. Restore by copying them back to `sites-enabled` and restarting nginx.
 
-*(Or if copying the `html-git` folder directly to your Pi via SCP:)*
-
-```bash
-scp -r html-git pi@<your-pi-ip>:~/KlipperWebMoonraker
-ssh pi@<your-pi-ip>
-cd ~/KlipperWebMoonraker
-chmod +x install.sh uninstall.sh
-./install.sh
+If the page shows **Offline**, add your network to `moonraker.conf`:
 ```
-
----
-
-## 🛠️ Interactive Installer Options
-
-When you run `./install.sh`, it checks your Raspberry Pi for any existing web interface (`Mainsail`, `Fluidd`, or an older `Klipper Web UI` installation) and asks:
-
-```text
-----------------------------------------------------------
-[!] Detected an existing Klipper Web UI installation on this Pi.
-    • Active Nginx site(s): mainsail
-----------------------------------------------------------
-Would you like to replace the existing web interface with the new one? (y/n) [default: y]:
-```
-
-### Option 1: Replace Existing Web Interface (`y` — Default)
-- Backs up your previous Nginx site configuration to `/etc/nginx/klipper-web-backup/`.
-- Replaces the old web files in `/var/www/klipper-screen-web` with the new version.
-- Serves **Klipper Web UI** directly on **Port 80** (`http://<your-pi-ip>/`) while preserving all `/websocket`, `/printer`, `/api`, `/server`, and `/webcam/` reverse-proxy routes so **OrcaSlicer / PrusaSlicer / Cura uploads and webcam streams continue working seamlessly**.
-
-### Option 2: Keep Existing Interface & Run Alongside on Port 8090 (`n`)
-- Leaves your existing Port 80 interface (`Mainsail` / `Fluidd`) untouched at `http://<your-pi-ip>/`.
-- Installs **Klipper Web UI** on **Port 8090** (or any custom port you choose):
-  - Open at: `http://<your-pi-ip>:8090/`
-  *(Note: Port `8090` is used by default to avoid conflicting with `camera-streamer` on port `8080`.)*
-
----
-
-## 🔄 Updating to a Newer Version
-
-To pull the latest updates and replace the installed files on your Raspberry Pi:
-
-```bash
-cd ~/KlipperWebMoonraker
-git pull
-./install.sh
-```
-
----
-
-## 🗑️ Uninstalling / Restoring Previous Web Interface
-
-To remove **Klipper Web UI** and restore your backed-up `Mainsail` or `Fluidd` configuration:
-
-```bash
-cd ~/KlipperWebMoonraker
-./uninstall.sh
-```
-
----
-
-## 🔐 Moonraker CORS / Authorization Note
-
-If opening the web UI from a different port or a local PC shows **`● Offline`**, ensure `/home/pi/printer_data/config/moonraker.conf` trusts your local network under `[authorization]`:
-
-```ini
 [authorization]
 trusted_clients:
-    10.0.0.0/8
-    127.0.0.0/8
-    169.254.0.0/16
-    172.16.0.0/12
     192.168.0.0/16
-    FE80::/10
-    ::1/128
 cors_domains:
-    *://*.lan
-    *://*.local
     *://192.168.*
-    *://10.*
 ```
 
-Then restart Moonraker:
+## Try it without installing
+Open `index.html` via any static server (`python -m http.server`) and set the Moonraker host in **Settings → Moonraker Host** (e.g. `192.168.0.99:7125`).
 
-```bash
-sudo systemctl restart moonraker
-```
+## Pages & Key Features
+- **Home**: Live nozzle & bed telemetry, coordinate readouts, load cell live force, and quick controls.
+- **Files & Timelapses**: G-code & 3MF browser with fast thumbnail previews, pre-print health check (validates material & remaining spool weight before printing), drag-and-drop upload, and **🎬 Timelapses** player/downloader.
+- **Printing**: Live progress, ETA, slicer time estimates, **🎯 Exclude Object** (interactive 2D build plate map to cancel individual failed parts mid-print), **📸 Camera Monitor** with full-screen view, frame snapshot download, and ↔ Horizontal / ↕ Vertical / ⟳ 180° rotation controls, and real-time babystepping.
+- **Spool Manager**: Visual filament spool showcase with live remaining weight (grams & meters) progress tracking, `-50g` / `+50g` steppers, 1kg/750g/500g/250g quick presets, and automatic filament deduction during printing.
+- **Calibrate**: Manual dual‑Z trim, bed screws, 3D bed mesh, Z‑offset live squish, probe accuracy, PID autotune, and nozzle load-cell weight gauge.
+- **Printer.cfg & Configs**: Multi-file configuration browser (`printer.cfg`, `moonraker.conf`, `crowsnest.conf`, macros), syntax-highlighted editor, and **📦 One-Click Config Backup (.zip)**.
+- **Logs**: Dedicated system log viewer (`klippy.log`, `moonraker.log`, `crowsnest.log`, etc.) with search, live auto-refresh, and one-click download/print.
+- **Settings & Alerts**:
+  - **Screen Sleep Timer**: User-configurable inactivity timeout (`Never`, `2 min`, `5 min`, `10 min`, `15 min`, `30 min`) that transitions to a low-power dark OLED sleep screen and wakes on any touch/interaction.
+  - **🔔 Push & Audio Alerts**: Browser notifications and WebAudio alert chimes on print finish, pause, or printer error.
+  - **Diagnostics & Health**: Live host CPU/RAM loads, MCU telemetry, motor buzz tests, and Config Health Check (detects and auto-fixes `LOAD_CELL_TARE` conflicts in `PRINT_START`).
+- **Power**: Firmware restart, host reboot, system shutdown, and emergency stop.
 
----
-
-## 📄 License
-
-Licensed under the MIT License. See [LICENSE](LICENSE) for details.

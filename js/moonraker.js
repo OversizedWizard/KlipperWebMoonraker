@@ -56,8 +56,8 @@ class MoonrakerClient{
   _subs(){
     const o={print_stats:null,virtual_sdcard:null,display_status:null,toolhead:null,gcode_move:null,
       extruder:null,heater_bed:null,fan:null,motion_report:null,idle_timeout:null,webhooks:null,
-      bed_mesh:null,configfile:['save_config_pending'],filament_switch_sensor:null};
-    this.objects.forEach(n=>{if(/^(load_cell|load_cell_probe|probe|filament_switch_sensor|filament_motion_sensor|screws_tilt_adjust|manual_probe)/.test(n))o[n]=null});
+      bed_mesh:null,exclude_object:null,configfile:['save_config_pending'],filament_switch_sensor:null};
+    this.objects.forEach(n=>{if(/^(load_cell|load_cell_probe|probe|filament_switch_sensor|filament_motion_sensor|screws_tilt_adjust|manual_probe|exclude_object)/.test(n))o[n]=null});
     return o;
   }
   _openWS(){
@@ -222,9 +222,18 @@ class MoonrakerClient{
     const host=(this.base||'http://192.168.0.99:7125').replace(/\/+$/,'');
     return host+'/server/files/gcodes/'+rel.split('/').map(encodeURIComponent).join('/');
   }
-  async readConfig(){
+  async readConfig(filename='printer.cfg'){
     if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
-    const r=await this._fetch('/server/files/config/printer.cfg');return r.text()}
+    const clean=String(filename||'printer.cfg').replace(/^\/+/,'');
+    const r=await this._fetch('/server/files/config/'+clean.split('/').map(encodeURIComponent).join('/'));return r.text()}
+  async listConfigs(){
+    if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
+    try{
+      const res=await this.get('/server/files/list?root=config',8000);
+      if(Array.isArray(res))return res.filter(f=>!String(f.path||'').startsWith('.')&&!String(f.path||'').includes('/.'));
+    }catch(e){}
+    return [{path:'printer.cfg',size:0,modified:0}];
+  }
   async listLogs(){
     if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
     try{
@@ -248,11 +257,131 @@ class MoonrakerClient{
     const r=await this._fetch('/server/files/logs/'+clean.split('/').map(encodeURIComponent).join('/'),{},timeout);
     return r.text();
   }
-  async writeConfig(text){
+  async writeConfig(text,filename='printer.cfg'){
     if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
+    const clean=String(filename||'printer.cfg').replace(/^\/+/,'');
+    const parts=clean.split('/');
+    const baseName=parts.pop();
+    const subDir=parts.join('/');
     const fd=new FormData();
-    fd.append('file',new Blob([text],{type:'text/plain'}),'printer.cfg');fd.append('root','config');
+    fd.append('file',new Blob([text],{type:'text/plain'}),baseName);
+    fd.append('root','config');
+    if(subDir)fd.append('path',subDir);
     await this._fetch('/server/files/upload',{method:'POST',body:fd},15000);return true}
+  excludeObject(name){
+    if(!name)return Promise.resolve(false);
+    return this.gcode(`EXCLUDE_OBJECT NAME=${name}`);
+  }
+  async listTimelapses(){
+    if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
+    try{
+      const res=await this.get('/server/files/list?root=timelapse',8000);
+      if(Array.isArray(res))return res.filter(f=>/\.(mp4|webm|mkv|avi|gif|jpg|png)$/i.test(f.path||''));
+    }catch(e){}
+    try{
+      const dir=await this.get('/server/files/directory?path=timelapse&extended=true',8000);
+      if(dir&&Array.isArray(dir.files))return dir.files.map(f=>({path:f.filename,size:f.size,modified:f.modified}));
+    }catch(e){}
+    return [];
+  }
+  timelapseURL(rel){
+    const host=(this.base||'http://192.168.0.99:7125').replace(/\/+$/,'');
+    const clean=String(rel||'').replace(/^\/+/,'');
+    return host+'/server/files/timelapse/'+clean.split('/').map(encodeURIComponent).join('/');
+  }
+  async deleteTimelapse(rel){
+    const b=this.base||'http://192.168.0.99:7125';
+    const clean=String(rel||'').replace(/^\/+/,'');
+    const r=await this._fetch('/server/files/timelapse/'+clean.split('/').map(encodeURIComponent).join('/'),{method:'DELETE'},8000,b);
+    return r.ok;
+  }
+  async backupConfigsZip(){
+    const list=await this.listConfigs();
+    const files=list.filter(f=>/\.(cfg|conf|ini|json|txt|sh|py|md)$/i.test(f.path||'')&&(f.size||0)<5*1024*1024);
+    if(!files.length)files.push({path:'printer.cfg'});
+    const entries=[];
+    const enc=new TextEncoder();
+    for(const f of files){
+      try{
+        const txt=await this.readConfig(f.path);
+        entries.push({name:f.path,data:enc.encode(txt)});
+      }catch(e){}
+    }
+    if(!entries.length)throw new Error('No config files could be read');
+    return MoonrakerClient.createZipBlob(entries);
+  }
+  static createZipBlob(entries){
+    const crcTable=new Uint32Array(256);
+    for(let n=0;n<256;n++){
+      let c=n;
+      for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);
+      crcTable[n]=c>>>0;
+    }
+    const crc32=buf=>{
+      let c=0xFFFFFFFF;
+      for(let i=0;i<buf.length;i++)c=crcTable[(c^buf[i])&0xFF]^(c>>>8);
+      return (c^0xFFFFFFFF)>>>0;
+    };
+    const enc=new TextEncoder();
+    const localParts=[];
+    const centralParts=[];
+    let offset=0;
+    for(const item of entries){
+      const nameBytes=enc.encode(item.name);
+      const data=item.data;
+      const crc=crc32(data);
+      const localHdr=new Uint8Array(30+nameBytes.length);
+      const lv=new DataView(localHdr.buffer);
+      lv.setUint32(0,0x04034b50,true);
+      lv.setUint16(4,20,true);
+      lv.setUint16(6,0,true);
+      lv.setUint16(8,0,true);
+      lv.setUint16(10,0,true);
+      lv.setUint16(12,0,true);
+      lv.setUint32(14,crc,true);
+      lv.setUint32(18,data.length,true);
+      lv.setUint32(22,data.length,true);
+      lv.setUint16(26,nameBytes.length,true);
+      lv.setUint16(28,0,true);
+      localHdr.set(nameBytes,30);
+      localParts.push(localHdr,data);
+
+      const centHdr=new Uint8Array(46+nameBytes.length);
+      const cv=new DataView(centHdr.buffer);
+      cv.setUint32(0,0x02014b50,true);
+      cv.setUint16(4,20,true);
+      cv.setUint16(6,20,true);
+      cv.setUint16(8,0,true);
+      cv.setUint16(10,0,true);
+      cv.setUint16(12,0,true);
+      cv.setUint16(14,0,true);
+      cv.setUint32(16,crc,true);
+      cv.setUint32(20,data.length,true);
+      cv.setUint32(24,data.length,true);
+      cv.setUint16(28,nameBytes.length,true);
+      cv.setUint16(30,0,true);
+      cv.setUint16(32,0,true);
+      cv.setUint16(34,0,true);
+      cv.setUint16(36,0,true);
+      cv.setUint32(38,0,true);
+      cv.setUint32(42,offset,true);
+      centHdr.set(nameBytes,46);
+      centralParts.push(centHdr);
+      offset+=localHdr.length+data.length;
+    }
+    const centralSize=centralParts.reduce((s,b)=>s+b.length,0);
+    const eocd=new Uint8Array(22);
+    const ev=new DataView(eocd.buffer);
+    ev.setUint32(0,0x06054b50,true);
+    ev.setUint16(4,0,true);
+    ev.setUint16(6,0,true);
+    ev.setUint16(8,entries.length,true);
+    ev.setUint16(10,entries.length,true);
+    ev.setUint32(12,centralSize,true);
+    ev.setUint32(16,offset,true);
+    ev.setUint16(20,0,true);
+    return new Blob([...localParts,...centralParts,eocd],{type:'application/zip'});
+  }
   uploadFile(file,subPath='',autoPrint=false,onProgress=null){
     return new Promise((resolve,reject)=>{
       const xhr=new XMLHttpRequest();

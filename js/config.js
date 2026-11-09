@@ -1,6 +1,7 @@
 /* printer.cfg editor with save and save & restart */
 App.pages.config = (() => {
   const root = $('#p-config');
+  let currentFile = 'printer.cfg';
   let originalText = '';
   let isDirty = false;
   let searchMatches = [];
@@ -8,7 +9,12 @@ App.pages.config = (() => {
 
   root.innerHTML = `
   <div class="cfg-bar">
-    <div class="cfg-badge">${ICON('config')} <span>printer.cfg</span></div>
+    <div class="cfg-badge" style="gap:6px">
+      ${ICON('config')}
+      <select class="cfg-sel" id="cfg-file-sel" title="Select configuration file to view or edit" style="font-weight:800;color:#F8FAFC;background:transparent;border:0;padding:2px 4px;cursor:pointer">
+        <option value="printer.cfg">printer.cfg</option>
+      </select>
+    </div>
     <span class="pill ok" id="cfg-status">● Saved</span>
     <select class="cfg-sel" id="cfg-sections" title="Jump directly to a configuration section">
       <option value="">Jump to section…</option>
@@ -26,6 +32,7 @@ App.pages.config = (() => {
       <b id="cfg-font-val">13px</b>
     </div>
     <div class="grow"></div>
+    <button class="cfg-btn" id="cfg-backup-zip" title="Download all config files as a .zip archive" style="border-color:rgba(56,189,248,.4);color:#7DD3FC">📦 Backup (.zip)</button>
     <button class="cfg-btn reload" id="cfg-reload" title="Discard edits and reload from printer">⟳ Reload</button>
     <button class="cfg-btn pri" id="cfg-save">💾 Save</button>
     <button class="cfg-btn cfg-restart" id="cfg-save-restart">⚡ Save & Restart</button>
@@ -371,12 +378,84 @@ App.pages.config = (() => {
     }
   };
 
+  const fileSel = $('#cfg-file-sel', root);
+
+  const loadConfigList = async () => {
+    try {
+      const list = await MR.listConfigs();
+      const editable = list.filter(f => /\.(cfg|conf|ini|json|txt)$/i.test(f.path || '') && !/^printer-\d{8}_\d{6}\.cfg$/i.test(f.path || ''));
+      const priority = ['printer.cfg', 'moonraker.conf', 'crowsnest.conf', 'KAMP_Settings.cfg', 'klipper-touch.conf'];
+      editable.sort((a, b) => {
+        const ai = priority.findIndex(p => p.toLowerCase() === a.path.toLowerCase());
+        const bi = priority.findIndex(p => p.toLowerCase() === b.path.toLowerCase());
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.path.localeCompare(b.path);
+      });
+      if (editable.length && fileSel) {
+        fileSel.innerHTML = editable.map(f => `<option value="${f.path}" ${f.path === currentFile ? 'selected' : ''} style="background:#0F172A;color:#F8FAFC">${f.path}</option>`).join('');
+      }
+    } catch (e) {}
+  };
+
+  if (fileSel) {
+    fileSel.addEventListener('change', () => {
+      const nextFile = fileSel.value;
+      if (!nextFile || nextFile === currentFile) return;
+      if (isDirty) {
+        confirmBox(
+          'Discard Unsaved Changes?',
+          `You have unsaved edits in <b>${currentFile}</b>. Switch to <b>${nextFile}</b> without saving?`,
+          'Switch File',
+          () => {
+            currentFile = nextFile;
+            loadConfig();
+          },
+          true
+        );
+        fileSel.value = currentFile;
+      } else {
+        currentFile = nextFile;
+        loadConfig();
+      }
+    });
+  }
+
+  $('#cfg-backup-zip', root).onclick = async () => {
+    const btn = $('#cfg-backup-zip', root);
+    btn.disabled = true;
+    btn.textContent = '📦 Packing…';
+    try {
+      const blob = await MR.backupConfigsZip();
+      const d = new Date();
+      const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `klipper-configs-backup-${stamp}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 500);
+      toast('✓ Downloaded config backup (.zip)');
+    } catch (e) {
+      toast('⚠ Backup failed: ' + (e.message || e));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📦 Backup (.zip)';
+    }
+  };
+
   // Load config from Moonraker
   const loadConfig = async () => {
     statusPill.className = 'pill';
     statusPill.textContent = 'Loading…';
     try {
-      const text = await MR.readConfig();
+      loadConfigList();
+      const text = await MR.readConfig(currentFile);
       originalText = text;
       ta.value = text;
       updateHighlight();
@@ -384,11 +463,11 @@ App.pages.config = (() => {
       updateGutter();
       parseSections();
       updateCursor();
-      toast('printer.cfg loaded');
+      toast(`${currentFile} loaded`);
     } catch (e) {
       statusPill.className = 'pill bad';
       statusPill.textContent = 'Load Failed';
-      toast('Failed to load printer.cfg from printer');
+      toast(`Failed to load ${currentFile} from printer`);
     }
   };
 
@@ -402,18 +481,18 @@ App.pages.config = (() => {
     statusPill.textContent = '● Uploading…';
 
     try {
-      const ok = await MR.writeConfig(text);
+      const ok = await MR.writeConfig(text, currentFile);
       if (ok) {
         originalText = text;
         markDirty(false);
         parseSections();
-        toast('✓ printer.cfg saved to printer');
+        toast(`✓ ${currentFile} saved to printer`);
       } else {
         toast('⚠ Upload failed');
         markDirty(true);
       }
     } catch (e) {
-      toast('⚠ Failed to save printer.cfg: ' + e.message);
+      toast(`⚠ Failed to save ${currentFile}: ` + e.message);
       markDirty(true);
     } finally {
       btn.disabled = false;
@@ -425,7 +504,7 @@ App.pages.config = (() => {
   const saveAndRestart = () => {
     confirmBox(
       'Save & Restart Klipper',
-      'This will save <b>printer.cfg</b> and immediately execute a Klipper <b>RESTART</b>. Motors and active jobs will stop. Proceed?',
+      `This will save <b>${currentFile}</b> and immediately execute a Klipper <b>RESTART</b>. Motors and active jobs will stop. Proceed?`,
       'Save & Restart',
       async () => {
         const text = ta.value;
@@ -436,11 +515,11 @@ App.pages.config = (() => {
         statusPill.textContent = '● Restarting…';
 
         try {
-          const ok = await MR.writeConfig(text);
+          const ok = await MR.writeConfig(text, currentFile);
           if (ok) {
             originalText = text;
             markDirty(false);
-            toast('✓ Saved! Restarting Klipper…');
+            toast(`✓ Saved ${currentFile}! Restarting Klipper…`);
             await MR.restart();
             setTimeout(() => {
               go('home');

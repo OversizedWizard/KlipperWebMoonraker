@@ -113,21 +113,153 @@ App.pages.calibrate = (() => {
 
 App.pages.settings = (() => {
   const root = $('#p-settings');
+  const getSleepLabel = () => {
+    const m = +(localStorage.getItem('sleep_timeout_min') ?? 10);
+    return m > 0 ? `${m} min` : 'Never (Off)';
+  };
+  const getNotifLabel = () => {
+    const n = localStorage.getItem('notif_enabled') !== '0';
+    const c = localStorage.getItem('chime_enabled') !== '0';
+    return (n && c) ? 'Push + Chime ON' : n ? 'Push ON' : c ? 'Chime ON' : 'Muted';
+  };
   const draw = () => {
     const cal = ['bed_mesh', 'z_offset', 'probe_cal', 'screws_tilt', 'dual_z_trim', 'probe_acc', 'pid_tune', 'load_cell_weight_test'].filter(supported);
     root.innerHTML = `${cal.length ? '<div class="hdr">BED & PROBE CALIBRATION SHORTCUTS</div><div class="grid2">' + cal.map(k => cardHTML(k, CAL[k])).join('') + '</div>' : ''}
-    <div class="hdr">DIAGNOSTICS, FIRMWARE & HOST</div><div class="grid2">
+    <div class="hdr">DISPLAY, ALERTS & BACKUP</div><div class="grid2">
+     <div class="cc" id="s-sleep">${ICON('clock')}<div><div class="ti">Screen Sleep Timer</div><div class="ds">Auto-dim / low-power sleep screen after inactivity.</div><span class="cmd" id="s-sleep-badge">TIMEOUT: ${getSleepLabel().toUpperCase()}</span></div><span class="ar">›</span></div>
+     <div class="cc" id="s-notif">${ICON('info')}<div><div class="ti">Print & Alert Notifications</div><div class="ds">Browser push notifications & audio chime on finish/error.</div><span class="cmd" id="s-notif-badge">${getNotifLabel().toUpperCase()}</span></div><span class="ar">›</span></div>
+     <div class="cc" id="s-backup">${ICON('folder')}<div><div class="ti">Backup All Configs (.zip)</div><div class="ds">Download printer.cfg, moonraker.conf & macros as a ZIP.</div><span class="cmd">ONE-CLICK ZIP BACKUP</span></div><span class="ar">›</span></div>
+     <div class="cc" id="s-host">${ICON('settings')}<div><div class="ti">Moonraker Host</div><div class="ds">${MR.base || 'not connected'}</div><span class="cmd">CONNECTION</span></div><span class="ar">›</span></div>
+    </div>
+    <div class="hdr">DIAGNOSTICS & HARDWARE</div><div class="grid2">
      <div class="cc" id="s-tests">${ICON('endstop')}<div><div class="ti">Printer Tests</div><div class="ds">Motor buzz, endstops & nozzle touch.</div><span class="cmd">MOTORS • ENDSTOPS</span></div><span class="ar">›</span></div>
      <div class="cc" id="s-fw">${ICON('firmware')}<div><div class="ti">Firmware & MCU Info</div><div class="ds">Live host, MCU & Klipper telemetry.</div><span class="cmd">SYSTEM LOADS</span></div><span class="ar">›</span></div>
      <div class="cc" id="s-fix">${ICON('tune')}<div><div class="ti">Config Health Check</div><div class="ds">Scan PRINT_START for known print-cancel causes.</div><span class="cmd">printer.cfg</span></div><span class="ar">›</span></div>
-     <div class="cc" id="s-host">${ICON('settings')}<div><div class="ti">Moonraker Host</div><div class="ds">${MR.base || 'not connected'}</div><span class="cmd">CONNECTION</span></div><span class="ar">›</span></div></div>`;
+    </div>`;
     root.querySelectorAll('[data-k]').forEach(c => c.onclick = () => openCal(c.dataset.k));
     $('#s-tests').onclick = printerTests; $('#s-fw').onclick = sysLoads; $('#s-fix').onclick = healthCheck;
+    $('#s-sleep').onclick = openSleepSettings;
+    $('#s-notif').onclick = openNotifSettings;
+    $('#s-backup').onclick = async () => {
+      toast('📦 Building config backup (.zip)…');
+      try {
+        const res = await MR.backupConfigsZip();
+        const url = URL.createObjectURL(res.blob);
+        const a = document.createElement('a');
+        const dateStr = new Date().toISOString().slice(0, 10);
+        a.href = url;
+        a.download = `klipper-configs-backup-${dateStr}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 3000);
+        toast(`✓ Downloaded ${res.count} config file(s) (.zip)`);
+      } catch (e) {
+        toast('⚠ Backup failed: ' + (e.message || 'error'));
+      }
+    };
     $('#s-host').onclick = () => {
       const n = el(`<div class="dlg" style="max-width:420px"><h3>Moonraker Host</h3><div class="sub">e.g. 192.168.0.99:7125 — leave empty for auto</div><input id="hi" style="width:100%;margin:8px 0" value="${localStorage.getItem('moonraker_host') || ''}"><div class="row" style="justify-content:flex-end"><button class="btn" id="hc">Cancel</button><button class="btn pri" id="hs">Save & Reload</button></div></div>`);
       const cl = modal(n); $('#hc', n).onclick = cl; $('#hs', n).onclick = () => { const v = $('#hi', n).value.trim(); v ? localStorage.setItem('moonraker_host', v) : localStorage.removeItem('moonraker_host'); location.reload() }
     };
   };
+  function openSleepSettings() {
+    let cur = +(localStorage.getItem('sleep_timeout_min') ?? 10);
+    const opts = [[0, 'Never (Off)'], [2, '2 min'], [5, '5 min'], [10, '10 min'], [15, '15 min'], [30, '30 min']];
+    const n = el(`<div class="dlg" style="max-width:480px;border:1.5px solid rgba(0,229,255,.45)">
+      <div class="row" style="align-items:center;margin-bottom:6px">
+        <div style="width:28px;color:#00E5FF">${ICON('clock')}</div>
+        <div class="grow">
+          <h3 style="margin:0">Screen Sleep Timer</h3>
+          <div class="sub">Enter low-power dark screen saver after inactivity</div>
+        </div>
+        <button class="x" id="sl-x">✕</button>
+      </div>
+      <div class="grid3" style="margin:12px 0;gap:8px" id="sl-grid">
+        ${opts.map(([v, l]) => `<button class="btn ${cur === v ? 'on' : ''}" data-min="${v}" style="min-height:46px;font-weight:800">${l}</button>`).join('')}
+      </div>
+      <div class="sub" style="margin-bottom:12px;font-size:12px">Tap anywhere on the screen to wake immediately. Sleep screen displays current clock, temperatures, and print progress.</div>
+      <div class="row" style="justify-content:space-between">
+        <button class="btn" id="sl-test">🌙 Test Sleep Screen Now</button>
+        <div class="row" style="gap:8px">
+          <button class="btn" id="sl-c">Cancel</button>
+          <button class="btn pri" id="sl-s" style="font-weight:800">Save Setting</button>
+        </div>
+      </div>
+    </div>`);
+    const cl = modal(n);
+    n.querySelectorAll('[data-min]').forEach(b => b.onclick = () => {
+      cur = +b.dataset.min;
+      n.querySelectorAll('[data-min]').forEach(x => x.classList.toggle('on', x === b));
+    });
+    $('#sl-x', n).onclick = $('#sl-c', n).onclick = cl;
+    $('#sl-test', n).onclick = () => { cl(); App.enterSleep?.(); };
+    $('#sl-s', n).onclick = () => {
+      localStorage.setItem('sleep_timeout_min', String(cur));
+      App.resetSleepTimer?.();
+      cl();
+      draw();
+      toast(`✓ Screen Sleep Timer set to ${cur > 0 ? cur + ' min' : 'Never (Off)'}`);
+    };
+  }
+  function openNotifSettings() {
+    let notifOn = localStorage.getItem('notif_enabled') !== '0';
+    let chimeOn = localStorage.getItem('chime_enabled') !== '0';
+    const n = el(`<div class="dlg" style="max-width:460px;border:1.5px solid rgba(0,229,255,.45)">
+      <div class="row" style="align-items:center;margin-bottom:8px">
+        <span style="font-size:20px">🔔</span>
+        <div class="grow">
+          <h3 style="margin:0">Print & Alert Notifications</h3>
+          <div class="sub">Get notified when a print finishes, pauses, or hits an error</div>
+        </div>
+        <button class="x" id="nf-x">✕</button>
+      </div>
+      <div class="col" style="gap:8px;margin:10px 0">
+        <div class="row box" style="align-items:center;justify-content:space-between;padding:10px 12px">
+          <div><b>Browser Push Notifications</b><div class="sub" style="font-size:11.5px">Desktop & mobile banner alerts</div></div>
+          <button class="btn sm ${notifOn ? 'on' : ''}" id="nf-push" style="min-width:80px;font-weight:800">${notifOn ? 'ON' : 'OFF'}</button>
+        </div>
+        <div class="row box" style="align-items:center;justify-content:space-between;padding:10px 12px">
+          <div><b>Audio Alert Chime</b><div class="sub" style="font-size:11.5px">Synthesized melody on print finish or error</div></div>
+          <button class="btn sm ${chimeOn ? 'on' : ''}" id="nf-chime" style="min-width:80px;font-weight:800">${chimeOn ? 'ON' : 'OFF'}</button>
+        </div>
+      </div>
+      <div class="row" style="justify-content:space-between;margin-top:12px">
+        <button class="btn sm" id="nf-test">🔊 Test Chime & Alert</button>
+        <div class="row" style="gap:8px">
+          <button class="btn" id="nf-c">Cancel</button>
+          <button class="btn pri" id="nf-s" style="font-weight:800">Save</button>
+        </div>
+      </div>
+    </div>`);
+    const cl = modal(n);
+    $('#nf-push', n).onclick = async () => {
+      notifOn = !notifOn;
+      if (notifOn && 'Notification' in window && Notification.permission === 'default') {
+        try { await Notification.requestPermission(); } catch (e) {}
+      }
+      $('#nf-push', n).classList.toggle('on', notifOn);
+      $('#nf-push', n).textContent = notifOn ? 'ON' : 'OFF';
+    };
+    $('#nf-chime', n).onclick = () => {
+      chimeOn = !chimeOn;
+      $('#nf-chime', n).classList.toggle('on', chimeOn);
+      $('#nf-chime', n).textContent = chimeOn ? 'ON' : 'OFF';
+    };
+    $('#nf-test', n).onclick = () => {
+      App.playAlertChime?.('complete');
+      App.sendPushAlert?.('Klipper Print Complete', 'Test notification from Klipper Screen Web!');
+      toast('🔔 Played test chime & alert');
+    };
+    $('#nf-x', n).onclick = $('#nf-c', n).onclick = cl;
+    $('#nf-s', n).onclick = () => {
+      localStorage.setItem('notif_enabled', notifOn ? '1' : '0');
+      localStorage.setItem('chime_enabled', chimeOn ? '1' : '0');
+      cl();
+      draw();
+      toast('✓ Notification settings saved');
+    };
+  }
   MR.on('config', draw); draw(); return { show: draw };
 })();
 function healthCheck() {

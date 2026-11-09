@@ -26,6 +26,7 @@ App.pages.files=(()=>{
         <button class="btn sm" id="f-view-toggle" title="Toggle Grid / List View">
           ${viewMode==='grid'?ICON('list',16)+' List':ICON('grid',16)+' Grid'}
         </button>
+        <button class="btn sm" id="f-timelapse-btn" title="View & Download Timelapses" style="border-color:rgba(192,132,252,.4);color:#E9D5FF">🎬 Timelapses</button>
         <button class="btn sm" id="f-mkdir-btn" title="Create New Folder">${ICON('folderadd',16)} New Folder</button>
         <button class="btn sm" id="f-refresh-btn" title="Refresh files">${ICON('reload',16)||'⟳'}</button>
         <button class="btn sm pri" id="f-upload-btn" style="font-weight:800">
@@ -329,13 +330,49 @@ App.pages.files=(()=>{
     }
   }
 
+  function checkPrePrintWarnings(m,it){
+    const warnings=[];
+    const sp=App.getActiveSpool?.();
+    if(!sp)return {warnings,sp:null};
+    const reqGrams=m.filament_weight_total||(m.filament_total?m.filament_total*0.00298:0);
+    let fileMat=(m.filament_type||'').toUpperCase();
+    if(!fileMat&&it?.name){
+      const match=it.name.toUpperCase().match(/\b(PLA|PETG|ABS|TPU|ASA|NYLON)\b/);
+      if(match)fileMat=match[1];
+    }
+    const spoolMat=(sp.type||'PLA').toUpperCase();
+    if(fileMat&&!fileMat.includes(spoolMat)&&!spoolMat.includes(fileMat)){
+      warnings.push(`Material mismatch: File sliced for <b>${fileMat}</b>, but active spool is <b>${sp.name} (${spoolMat})</b>.`);
+    }
+    const flNoz=Number(m.first_layer_extr_temp)||0;
+    if(flNoz>0&&Math.abs(flNoz-(sp.nozzle||205))>18){
+      warnings.push(`Nozzle temp notice: File first layer is <b>${Math.round(flNoz)}°C</b> vs spool preset <b>${sp.nozzle}°C</b>.`);
+    }
+    const remG=sp.weight!==undefined?Number(sp.weight):1000;
+    if(reqGrams>0&&reqGrams>remG){
+      warnings.push(`Low filament warning: Print needs <b>${reqGrams.toFixed(1)} g</b>, but active spool only has <b>${Math.round(remG)} g</b> left.`);
+    }
+    return {warnings,sp,reqGrams,fileMat};
+  }
+
   async function showDetails(full,it){
     const m=metaCache[full]||(await MR.meta(full))||{};
     const t=m.thumbnails?.length?m.thumbnails.sort((a,b)=>b.width-a.width)[0]:null;
     const dir=full.includes('/')?full.slice(0,full.lastIndexOf('/')+1):'';
     const thumbSrc=m.localThumbUrl||(t?MR.thumbURL(dir+t.relative_path):'');
-    const filGrams=m.filament_weight_total?m.filament_weight_total.toFixed(1)+' g':m.filament_total?(m.filament_total*0.003).toFixed(1)+' g':'--';
+    const filGrams=m.filament_weight_total?m.filament_weight_total.toFixed(1)+' g':m.filament_total?(m.filament_total*0.00298).toFixed(1)+' g':'--';
     const filMeters=m.filament_total?(m.filament_total/1000).toFixed(2)+' m':'--';
+    const check=checkPrePrintWarnings(m,it);
+
+    const warnBanner=check.warnings.length
+      ?`<div class="box" style="margin:8px 0;background:rgba(245,158,11,.12);border:1.5px solid rgba(251,191,36,.5);color:#FDE68A;font-size:12px;line-height:1.45">
+         <div style="font-weight:900;color:#FBBF24;margin-bottom:3px">⚠ PRE-PRINT HEALTH CHECK WARNING</div>
+         ${check.warnings.map(w=>`<div>• ${w}</div>`).join('')}
+       </div>`
+      :(check.sp?`<div class="box row" style="margin:8px 0;padding:7px 12px;background:rgba(16,185,129,.1);border:1px solid rgba(52,211,153,.35);color:#6EE7B7;font-size:12px;align-items:center;justify-content:space-between">
+         <span>✓ <b>Pre-Print Check Passed</b> — Ready for active spool <b>${check.sp.name} (${check.sp.type})</b></span>
+         <span class="mono" style="font-weight:800">${Math.round(check.sp.weight??1000)}g avail</span>
+       </div>`:'');
 
     const n=el(`<div class="dlg" style="max-width:580px;border:1.5px solid rgba(0,229,255,.4)">
       <div class="row" style="align-items:center;margin-bottom:8px">
@@ -343,7 +380,8 @@ App.pages.files=(()=>{
         <h3 class="grow fn" style="margin:0;font-size:16px" title="${it.name}">${it.name}</h3>
         <button class="x" id="dx">✕</button>
       </div>
-      <div class="row" style="gap:14px;margin:12px 0">
+      ${warnBanner}
+      <div class="row" style="gap:14px;margin:10px 0">
         <div style="width:180px;height:180px;background:#070B14;border-radius:12px;border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none">
           ${thumbSrc?`<img src="${thumbSrc}" style="width:100%;height:100%;object-fit:contain">`:`<div style="color:rgba(56,189,248,.35)">${ICON('cube',72)}</div>`}
         </div>
@@ -352,6 +390,7 @@ App.pages.files=(()=>{
             ['Estimated Print Time',fmtTime(m.estimated_time)],
             ['Filament Length',filMeters],
             ['Filament Weight',filGrams],
+            ['Filament Type',m.filament_type||check.fileMat||'--'],
             ['Layer Height',m.layer_height?m.layer_height+' mm':'--'],
             ['First Layer Height',m.first_layer_height?m.first_layer_height+' mm':'--'],
             ['Object Height',m.object_height?m.object_height+' mm':'--'],
@@ -383,6 +422,79 @@ App.pages.files=(()=>{
         toast('⚠ Start print failed: '+e.message);
       }
     };
+  }
+
+  async function openTimelapsesModal(){
+    const n=el(`<div class="dlg" style="max-width:680px;border:1.5px solid rgba(192,132,252,.45)">
+      <div class="row" style="align-items:center;margin-bottom:10px">
+        <span style="font-size:20px">🎬</span>
+        <div class="grow">
+          <h3 style="margin:0;font-size:16px">Moonraker Timelapse Videos</h3>
+          <div class="sub">Recorded print timelapses from /server/files/timelapse</div>
+        </div>
+        <button class="btn sm" id="tl-ref">⟳ Refresh</button>
+        <button class="x" id="tl-x">✕</button>
+      </div>
+      <div id="tl-player-wrap" style="display:none;margin-bottom:10px;background:#050811;border:1px solid rgba(192,132,252,.35);border-radius:12px;padding:8px">
+        <video id="tl-video" controls style="width:100%;max-height:280px;border-radius:8px;background:#000"></video>
+        <div class="row" style="justify-content:space-between;align-items:center;margin-top:6px">
+          <span class="mono" id="tl-now" style="font-size:12px;color:#E9D5FF;font-weight:700"></span>
+          <a class="btn sm pri" id="tl-dl-active" download style="text-decoration:none">⬇ Download Video</a>
+        </div>
+      </div>
+      <div id="tl-list" class="col" style="max-height:290px;overflow-y:auto;gap:6px">
+        <div class="sub" style="padding:20px;text-align:center">Loading timelapse files…</div>
+      </div>
+    </div>`);
+    const close=modal(n);
+    $('#tl-x',n).onclick=close;
+    const loadTL=async()=>{
+      const box=$('#tl-list',n);
+      box.innerHTML='<div class="sub" style="padding:20px;text-align:center">Scanning timelapse directory…</div>';
+      const files=await MR.listTimelapses();
+      const vids=(files||[]).filter(f=>/\.(mp4|webm|mkv|avi|gif)$/i.test(f.path||f.filename||'')).sort((a,b)=>(b.modified||0)-(a.modified||0));
+      if(!vids.length){
+        box.innerHTML=`<div class="box col" style="align-items:center;padding:24px;text-align:center;color:var(--muted)">
+          <div style="font-size:28px;margin-bottom:6px">🎬</div>
+          <b style="color:#E2E8F0">No Timelapse Videos Found Yet</b>
+          <div class="sub" style="max-width:440px;margin-top:4px">When <code>[timelapse]</code> is active in Moonraker, recorded <code>.mp4</code> print videos appear here automatically for playback and download.</div>
+        </div>`;
+        return;
+      }
+      box.innerHTML='';
+      vids.forEach(v=>{
+        const name=v.path||v.filename;
+        const url=MR.timelapseURL(name);
+        const r=el(`<div class="row box" style="align-items:center;justify-content:space-between;padding:8px 12px">
+          <div class="col" style="min-width:0">
+            <b class="fn" style="color:#F8FAFC;font-size:13px">${name}</b>
+            <span class="sub" style="font-size:11px">${fmtSize(v.size)} • ${fmtDate(v.modified)}</span>
+          </div>
+          <div class="row" style="gap:6px">
+            <button class="btn sm pri tl-play">▶ Play</button>
+            <a class="btn sm" href="${url}" download="${name}" style="text-decoration:none">⬇</a>
+            <button class="btn sm danger tl-del">${ICON('trash',14)}</button>
+          </div>
+        </div>`);
+        $('.tl-play',r).onclick=()=>{
+          const pw=$('#tl-player-wrap',n),vid=$('#tl-video',n);
+          pw.style.display='block';
+          vid.src=url;
+          vid.play().catch(()=>{});
+          $('#tl-now',n).textContent=name;
+          $('#tl-dl-active',n).href=url;
+          $('#tl-dl-active',n).setAttribute('download',name);
+        };
+        $('.tl-del',r).onclick=()=>confirmBox('Delete Timelapse?',`Delete "${name}" permanently?`,'Delete',async()=>{
+          await MR.deleteTimelapse(name);
+          toast('Deleted '+name);
+          loadTL();
+        },true);
+        box.append(r);
+      });
+    };
+    $('#tl-ref',n).onclick=loadTL;
+    loadTL();
   }
 
   function confirmDelete(it,full){
@@ -804,6 +916,7 @@ App.pages.files=(()=>{
     filterAndRender();
   };
 
+  $('#f-timelapse-btn').onclick=openTimelapsesModal;
   $('#f-mkdir-btn').onclick=promptNewFolder;
   $('#f-refresh-btn').onclick=load;
 
@@ -853,8 +966,8 @@ App.pages.printing=(()=>{
   const root=$('#p-printing');let z0=0,babysteps=0,curFileMeta=null;
   root.innerHTML=`<div class="print-grid">
    <div class="print-col">
-    <div class="card cam-card"><div class="cam-head"><b class="hico">${CICON('camera')} CAMERA</b><span class="sub" id="camst">connecting…</span><span class="grow"></span><button class="btn sm" id="camfs">⛶ Fullscreen</button><button class="btn sm" id="camset">⚙</button></div>
-     <div class="cam-box" id="cambox"><img id="camimg" alt=""><div class="cam-empty" id="camempty">No webcam found.<br><small>Tap ⚙ to enter a stream URL</small></div></div></div>
+    <div class="card cam-card"><div class="cam-head"><b class="hico">${CICON('camera')} CAMERA</b><span class="sub" id="camst">connecting…</span><span class="grow"></span><button class="btn sm" id="camsnap" title="Save Camera Snapshot">📸 Snap</button><button class="btn sm" id="camfs" title="Fullscreen & Flip/Rotate">⛶ Expand</button><button class="btn sm" id="camset">⚙</button></div>
+     <div class="cam-box" id="cambox" style="cursor:pointer"><img id="camimg" alt="" crossorigin="anonymous"><div class="cam-empty" id="camempty">No webcam found.<br><small>Tap ⚙ to enter a stream URL</small></div></div></div>
     <div class="card print-file" style="align-items:flex-start">
      <img id="pthumb" class="thumb" alt="" style="width:110px;height:110px;border-radius:12px;background:#070B14;border:1px solid rgba(0,229,255,.25);object-fit:contain;flex:none">
      <div class="fico">${CICON('file')}</div>
@@ -894,25 +1007,114 @@ App.pages.printing=(()=>{
      <div class="tile"><div class="tic">${CICON('flow')}</div><div class="k">FLOW</div><div class="vv" id="pm-flw">100%</div></div>
      <div class="tile"><div class="tic">${CICON('fan')}</div><div class="k">FAN</div><div class="vv" id="pm-fan">0%</div></div>
     </div>
-    <div class="grid3" id="pbtns"><button class="btn xl pri" id="ppause">⏸ Pause</button><button class="btn xl" id="ptune">${ICON('tune',20)} Fine Tune</button><button class="btn xl danger" id="pcancel">✕ Cancel</button></div>
+    <div class="grid4" id="pbtns"><button class="btn xl pri" id="ppause">⏸ Pause</button><button class="btn xl" id="pexclude" style="border-color:rgba(251,191,36,.45);color:#FBBF24" title="Cancel individual failed object during print">🎯 Exclude</button><button class="btn xl" id="ptune">${ICON('tune',20)} Fine Tune</button><button class="btn xl danger" id="pcancel">✕ Cancel</button></div>
     <div class="grid2" id="pdone" style="display:none"><button class="btn xl green" id="psave">Save Z-Offset</button><button class="btn xl pri" id="phome">Return Home</button></div>
    </div></div>`;
   $('#pt-nozzle',root).onclick=()=>preheat('nozzle');
   $('#pt-bed',root).onclick=()=>preheat('bed');
   (function cam(){
-    const img=$('#camimg'),st=$('#camst'),empty=$('#camempty');let timer=null;
+    const img=$('#camimg'),st=$('#camst'),empty=$('#camempty');let timer=null,curSnapUrl=null;
+    const getCamTf=()=>{
+      const fh=localStorage.getItem('cam_fliph')==='1';
+      const fv=localStorage.getItem('cam_flipv')==='1';
+      const r180=localStorage.getItem('cam_rot180')==='1';
+      const sx=(fh?-1:1)*(r180?-1:1);
+      const sy=(fv?-1:1)*(r180?-1:1);
+      return `scale(${sx},${sy})`;
+    };
+    const applyTf=()=>{if(img)img.style.transform=getCamTf()};
+    applyTf();
     const absURL=u=>{if(!u)return null;if(/^https?:/.test(u))return u;const b=new URL(MR.base);
       return (u.startsWith('/')?(b.port&&b.port!=='7125'?b.origin:b.protocol+'//'+b.hostname):b.origin)+(u.startsWith('/')?'':'/')+u};
     async function start(){
       clearInterval(timer);let url=localStorage.getItem('webcam_url'),snap=null;
       if(!url&&MR.connected){try{const r=await MR.get('/server/webcams/list');const w=(r.webcams||[]).find(x=>x.enabled!==false);
         if(w){url=absURL(w.stream_url);snap=absURL(w.snapshot_url)}}catch(e){}}
+      curSnapUrl=snap||(url?url.replace('action=stream','action=snapshot'):null);
       if(!url){empty.style.display='flex';img.style.display='none';st.textContent='no camera';return}
       empty.style.display='none';img.style.display='block';st.textContent=url.replace(/^https?:\/\//,'');
+      applyTf();
       img.onerror=()=>{if(snap){st.textContent='snapshot mode';img.onerror=null;const t=()=>img.src=snap+(snap.includes('?')?'&':'?')+'t='+Date.now();t();timer=setInterval(t,1000)}else st.textContent='stream error'};
       img.src=url;
     }
-    $('#camfs').onclick=()=>{const b=$('#cambox');(document.fullscreenElement?document.exitFullscreen():b.requestFullscreen?.())};
+    const takeSnapshot=()=>{
+      if(img&&img.naturalWidth>0){
+        try{
+          const cv=document.createElement('canvas');
+          cv.width=img.naturalWidth;cv.height=img.naturalHeight;
+          const ctx=cv.getContext('2d');
+          const fh=localStorage.getItem('cam_fliph')==='1';
+          const fv=localStorage.getItem('cam_flipv')==='1';
+          const r180=localStorage.getItem('cam_rot180')==='1';
+          const sx=(fh?-1:1)*(r180?-1:1),sy=(fv?-1:1)*(r180?-1:1);
+          ctx.translate(sx<0?cv.width:0,sy<0?cv.height:0);
+          ctx.scale(sx,sy);
+          ctx.drawImage(img,0,0);
+          cv.toBlob(b=>{
+            if(!b)return;
+            const u=URL.createObjectURL(b);
+            const a=document.createElement('a');
+            a.href=u;a.download=`klipper-snapshot-${new Date().toISOString().replace(/[:.]/g,'-')}.png`;
+            a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);
+            toast('📸 Snapshot downloaded');
+          });
+          return;
+        }catch(e){}
+      }
+      if(curSnapUrl){
+        window.open(curSnapUrl,'_blank');
+        toast('📸 Opened camera snapshot');
+      }else{
+        toast('⚠ No active camera frame to capture');
+      }
+    };
+    const openCamModal=()=>{
+      let fh=localStorage.getItem('cam_fliph')==='1';
+      let fv=localStorage.getItem('cam_flipv')==='1';
+      let r180=localStorage.getItem('cam_rot180')==='1';
+      const n=el(`<div class="dlg" style="max-width:740px;border:1.5px solid rgba(0,229,255,.45)">
+        <div class="row" style="align-items:center;margin-bottom:8px">
+          <b class="hico" style="color:#00E5FF">${CICON('camera')} CAMERA MONITOR &ORIENTATION</b>
+          <span class="grow"></span>
+          <button class="btn sm pri" id="cm-snap">📸 Save Snapshot</button>
+          <button class="btn sm" id="cm-native-fs">⛶ Native Fullscreen</button>
+          <button class="x" id="cm-x">✕</button>
+        </div>
+        <div id="cm-view" style="height:360px;background:#050811;border-radius:12px;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative">
+          ${img&&img.src&&img.style.display!=='none'?`<img id="cm-img" src="${img.src}" style="max-width:100%;max-height:100%;object-fit:contain;transform:${getCamTf()}">`:`<div class="sub">No active webcam stream (${st.textContent})</div>`}
+        </div>
+        <div class="row" style="margin-top:10px;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="sub" style="font-weight:800">ORIENTATION:</span>
+          <button class="btn sm ${fh?'on':''}" id="cm-fh">↔ Flip Horizontal</button>
+          <button class="btn sm ${fv?'on':''}" id="cm-fv">↕ Flip Vertical</button>
+          <button class="btn sm ${r180?'on':''}" id="cm-r180">⟳ Rotate 180°</button>
+          <span class="grow"></span>
+          <button class="btn sm" id="cm-url">⚙ Stream URL</button>
+        </div>
+      </div>`);
+      const cl=modal(n);
+      const syncModalTf=()=>{
+        localStorage.setItem('cam_fliph',fh?'1':'0');
+        localStorage.setItem('cam_flipv',fv?'1':'0');
+        localStorage.setItem('cam_rot180',r180?'1':'0');
+        applyTf();
+        const mImg=$('#cm-img',n);
+        if(mImg)mImg.style.transform=getCamTf();
+        $('#cm-fh',n).classList.toggle('on',fh);
+        $('#cm-fv',n).classList.toggle('on',fv);
+        $('#cm-r180',n).classList.toggle('on',r180);
+      };
+      $('#cm-x',n).onclick=cl;
+      $('#cm-snap',n).onclick=takeSnapshot;
+      $('#cm-native-fs',n).onclick=()=>$('#cm-view',n).requestFullscreen?.();
+      $('#cm-fh',n).onclick=()=>{fh=!fh;syncModalTf()};
+      $('#cm-fv',n).onclick=()=>{fv=!fv;syncModalTf()};
+      $('#cm-r180',n).onclick=()=>{r180=!r180;syncModalTf()};
+      $('#cm-url',n).onclick=()=>{cl();$('#camset').click()};
+    };
+    $('#camsnap').onclick=takeSnapshot;
+    $('#camfs').onclick=openCamModal;
+    $('#cambox').onclick=openCamModal;
     $('#camset').onclick=()=>{const n=el(`<div class="dlg" style="max-width:480px"><h3>Webcam URL</h3><div class="sub">MJPEG stream, e.g. http://192.168.0.99/webcam/?action=stream — empty = auto-detect from Moonraker</div><input id="cu" style="width:100%;margin:8px 0" value="${localStorage.getItem('webcam_url')||''}"><div class="row" style="justify-content:flex-end"><button class="btn" id="cc2">Cancel</button><button class="btn pri" id="cs2">Save</button></div></div>`);
       const cl=modal(n);$('#cc2',n).onclick=cl;$('#cs2',n).onclick=()=>{const v=$('#cu',n).value.trim();v?localStorage.setItem('webcam_url',v):localStorage.removeItem('webcam_url');cl();start()}};
     MR.on('connection',ok=>ok&&start());if(MR.connected)start();
@@ -923,6 +1125,7 @@ App.pages.printing=(()=>{
   root.querySelectorAll('[data-z]').forEach(b=>b.onclick=()=>{MR.babystep(+b.dataset.z);babysteps++;z0+=+b.dataset.z;upd()});
   const upd=()=>{$('#pz').textContent=(z0>=0?'+':'')+z0.toFixed(3)+' mm';$('#pbs').textContent='Baby steps added: '+babysteps};
   $('#ppause').onclick=()=>{const st=stat().print_stats?.state;st==='paused'?MR.resume():MR.pause()};
+  $('#pexclude').onclick=excludeObjectModal;
   $('#pcancel').onclick=()=>confirmBox('Cancel print?','This will stop the print and turn off the heaters.','Cancel Print',()=>MR.cancel(),true);
   $('#ptune').onclick=fineTune;
   $('#psave').onclick=async()=>{await MR.gcode('Z_OFFSET_APPLY_PROBE');await MR.saveConfig();toast('Z-offset saved')};
@@ -1023,4 +1226,149 @@ function fineTune(){
   col('FAN','#C084FC',()=>fn,v=>v+'%',()=>ps[si]+'%',()=>{fn=Math.min(100,fn+ps[si]);MR.fan(fn)},()=>{fn=Math.max(0,fn-ps[si]);MR.fan(fn)},()=>{fn=fn>0?0:100;MR.fan(fn)});
   $('#fx',n).onclick=$('#fdone',n).onclick=close;
 }
+function excludeObjectModal(){
+  const getEO=()=>{
+    const eo=stat().exclude_object||{};
+    return {
+      objects:Array.isArray(eo.objects)?eo.objects:[],
+      excluded:Array.isArray(eo.excluded_objects)?eo.excluded_objects:[],
+      current:eo.current_object||null
+    };
+  };
+  const n=el(`<div class="dlg" style="max-width:680px;border:2px solid #FBBF24">
+    <div class="row" style="align-items:center;margin-bottom:8px">
+      <span style="font-size:20px">🎯</span>
+      <div class="grow">
+        <b style="color:#FBBF24;font-size:15px;letter-spacing:.5px">EXCLUDE OBJECT ([exclude_object])</b>
+        <div class="sub">Tap an object on the 2D build plate or in the list to cancel only that failed part</div>
+      </div>
+      <button class="x" id="eo-x">✕</button>
+    </div>
+    <div class="grid2" style="gap:12px;align-items:stretch">
+      <div class="box col" style="align-items:center;justify-content:center;background:#070B14;padding:10px">
+        <canvas id="eo-canvas" width="270" height="270" style="width:270px;height:270px;border-radius:10px;border:1px solid rgba(255,255,255,.12);cursor:pointer;background:#050811"></canvas>
+        <div class="row" style="gap:10px;margin-top:6px;font-size:11px;font-weight:700">
+          <span style="color:#34D399">● Active</span>
+          <span style="color:#00E5FF">● Current</span>
+          <span style="color:#EF4444">✕ Excluded</span>
+        </div>
+      </div>
+      <div class="col" style="gap:8px;max-height:310px;overflow-y:auto" id="eo-list"></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px">
+      <button class="btn pri" id="eo-close">Done</button>
+    </div>
+  </div>`);
+  const close=modal(n);
+  $('#eo-x',n).onclick=$('#eo-close',n).onclick=close;
+
+  const hitBoxes=[];
+  const render=()=>{
+    if(!n.isConnected)return;
+    const {objects,excluded,current}=getEO();
+    const cv=$('#eo-canvas',n),ctx=cv.getContext('2d');
+    const W=cv.width,H=cv.height;
+    ctx.clearRect(0,0,W,H);
+    // Grid lines (220x220mm bed)
+    const bedSize=220;
+    ctx.strokeStyle='rgba(148,163,184,0.12)';
+    ctx.lineWidth=1;
+    for(let g=0;g<=bedSize;g+=20){
+      const px=(g/bedSize)*(W-24)+12;
+      ctx.beginPath();ctx.moveTo(px,12);ctx.lineTo(px,H-12);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(12,px);ctx.lineTo(W-12,px);ctx.stroke();
+    }
+    const toScreen=(x,y)=>[12+(x/bedSize)*(W-24),H-12-(y/bedSize)*(H-24)];
+    hitBoxes.length=0;
+
+    const listBox=$('#eo-list',n);
+    listBox.innerHTML='';
+
+    if(!objects.length){
+      ctx.fillStyle='#64748B';
+      ctx.font='bold 12px system-ui, sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText('No multi-object metadata in current print',W/2,H/2-8);
+      ctx.font='11px system-ui, sans-serif';
+      ctx.fillText('Enable "Label Objects" in Orca/Prusa/Cura',W/2,H/2+12);
+      listBox.innerHTML=`<div class="box col" style="gap:6px;padding:14px;color:var(--muted)">
+        <b style="color:#F8FAFC">No [exclude_object] parts loaded</b>
+        <div class="sub">When printing a G-code sliced with <b>Label Objects / Exclude Objects</b> enabled, all individual parts appear on the 2D build plate and here for one-tap cancellation.</div>
+      </div>`;
+      return;
+    }
+
+    objects.forEach((obj,idx)=>{
+      const name=obj.name||('Object_'+(idx+1));
+      const isEx=excluded.includes(name);
+      const isCur=current===name;
+      const col=isEx?'#EF4444':isCur?'#00E5FF':'#34D399';
+      const poly=Array.isArray(obj.polygon)&&obj.polygon.length?obj.polygon:null;
+      const center=Array.isArray(obj.center)&&obj.center.length===2?obj.center:[110,110];
+      let minX=W,maxX=0,minY=H,maxY=0;
+
+      if(poly){
+        ctx.beginPath();
+        poly.forEach(([px,py],i)=>{
+          const [sx,sy]=toScreen(px,py);
+          if(sx<minX)minX=sx;if(sx>maxX)maxX=sx;
+          if(sy<minY)minY=sy;if(sy>maxY)maxY=sy;
+          i===0?ctx.moveTo(sx,sy):ctx.lineTo(sx,sy);
+        });
+        ctx.closePath();
+        ctx.fillStyle=isEx?'rgba(239,68,68,0.18)':isCur?'rgba(0,229,255,0.28)':'rgba(52,211,153,0.22)';
+        ctx.fill();
+        ctx.strokeStyle=col;
+        ctx.lineWidth=isCur?2.5:1.8;
+        ctx.stroke();
+      }else{
+        const [cx,cy]=toScreen(center[0],center[1]);
+        minX=cx-18;maxX=cx+18;minY=cy-18;maxY=cy+18;
+        ctx.fillStyle=isEx?'rgba(239,68,68,0.2)':isCur?'rgba(0,229,255,0.3)':'rgba(52,211,153,0.24)';
+        ctx.strokeStyle=col;
+        ctx.lineWidth=2;
+        ctx.beginPath();ctx.rect(minX,minY,36,36);ctx.fill();ctx.stroke();
+      }
+      const [cx,cy]=toScreen(center[0],center[1]);
+      ctx.fillStyle='#F8FAFC';
+      ctx.font='bold 10px monospace';
+      ctx.textAlign='center';
+      ctx.fillText(name.slice(0,14),cx,cy+3);
+      hitBoxes.push({name,isEx,minX:minX-4,maxX:maxX+4,minY:minY-4,maxY:maxY+4});
+
+      const row=el(`<div class="row box" style="align-items:center;justify-content:space-between;padding:8px 10px;border-color:${isCur?'#00E5FF':isEx?'rgba(239,68,68,.35)':'rgba(255,255,255,.1)'}">
+        <div class="col" style="min-width:0">
+          <b class="fn" style="font-size:12.5px;color:${isEx?'#94A3B8':'#F8FAFC'};${isEx?'text-decoration:line-through':''}">${name}</b>
+          <span class="sub" style="font-size:10.5px;color:${col};font-weight:800">${isEx?'✕ EXCLUDED':isCur?'● PRINTING NOW':'● ACTIVE'}</span>
+        </div>
+        ${isEx?`<span class="pill bad">Skipped</span>`:`<button class="btn sm danger eo-btn">Exclude</button>`}
+      </div>`);
+      const btn=$('.eo-btn',row);
+      if(btn){
+        btn.onclick=()=>confirmBox('Exclude Object?',`Skip printing "${name}" for the remainder of this print?`,'Exclude Object',async()=>{
+          await MR.excludeObject(name);
+          toast(`🎯 Excluded ${name}`);
+          setTimeout(render,400);
+        },true);
+      }
+      listBox.append(row);
+    });
+  };
+
+  $('#eo-canvas',n).onclick=e=>{
+    const rect=e.target.getBoundingClientRect();
+    const x=(e.clientX-rect.left)*(e.target.width/rect.width);
+    const y=(e.clientY-rect.top)*(e.target.height/rect.height);
+    const hit=hitBoxes.find(b=>!b.isEx&&x>=b.minX&&x<=b.maxX&&y>=b.minY&&y<=b.maxY);
+    if(hit){
+      confirmBox('Exclude Object?',`Skip printing "${hit.name}" for the remainder of this print?`,'Exclude Object',async()=>{
+        await MR.excludeObject(hit.name);
+        toast(`🎯 Excluded ${hit.name}`);
+        setTimeout(render,400);
+      },true);
+    }
+  };
+  render();
+}
+
 

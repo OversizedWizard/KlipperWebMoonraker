@@ -1,10 +1,12 @@
 /* Spool page + filament load/unload dialog + Power page */
 const PRESETS_F={PLA:[210,60],'PLA+':[215,60],PETG:[240,75],ABS:[250,100],ASA:[255,105],TPU:[220,50],Nylon:[260,90],PC:[270,110],PVA:[215,60],HIPS:[240,100]};
 const PALETTE=[['#EF4444','Red'],['#F97316','Orange'],['#F59E0B','Amber'],['#EAB308','Yellow'],['#10B981','Green'],['#06B6D4','Cyan'],['#3B82F6','Blue'],['#8B5CF6','Purple'],['#EC4899','Pink'],['#FFFFFF','White'],['#94A3B8','Silver/Grey'],['#1E293B','Black'],['#78350F','Brown'],['#14B8A6','Teal'],['#6366F1','Indigo'],['#84CC16','Lime']];
-const DEF_SPOOLS={1:{name:'Spool 1',type:'PLA',color:'#3B82F6',nozzle:210,bed:60},2:{name:'Spool 2',type:'PETG',color:'#10B981',nozzle:240,bed:75},3:{name:'Spool 3',type:'ABS',color:'#EF4444',nozzle:250,bed:100},4:{name:'Spool 4',type:'TPU',color:'#F59E0B',nozzle:220,bed:50}};
+const DEF_SPOOLS={1:{name:'Spool 1',type:'PLA',color:'#3B82F6',nozzle:210,bed:60,weight:1000,cap:1000},2:{name:'Spool 2',type:'PETG',color:'#10B981',nozzle:240,bed:75,weight:1000,cap:1000},3:{name:'Spool 3',type:'ABS',color:'#EF4444',nozzle:250,bed:100,weight:1000,cap:1000},4:{name:'Spool 4',type:'TPU',color:'#F59E0B',nozzle:220,bed:50,weight:1000,cap:1000}};
 App.pages.spool=(()=>{
-  const root=$('#p-spool');let spools=Object.assign({},DEF_SPOOLS,JSON.parse(localStorage.getItem('spools')||'{}'));let slot=1,dist=10;
+  const root=$('#p-spool');let spools=Object.assign({},DEF_SPOOLS,JSON.parse(localStorage.getItem('spools')||'{}'));let slot=1,dist=10,lastFilMm=null;
+  Object.keys(spools).forEach(k=>{if(spools[k].weight===undefined)spools[k].weight=1000;if(!spools[k].cap)spools[k].cap=1000;});
   const save=()=>localStorage.setItem('spools',JSON.stringify(spools));
+  App.getActiveSpool=()=>spools[slot]||spools[1];
   const hasAms=()=>Object.keys(MR.config).some(k=>/mmu|ercf|tradrack|happy_hare|bambu_ams|anycubic_ace/i.test(k)||(/^extruder\d/.test(k)));
   const spoolSvg=(color,type)=>`<svg viewBox="0 0 140 140" width="136" height="136" style="flex-shrink:0;filter:drop-shadow(0 4px 14px ${color}44)">
     <circle cx="70" cy="70" r="60" fill="#1E293B" stroke="rgba(148,163,184,0.55)" stroke-width="2.5"/>
@@ -22,10 +24,11 @@ App.pages.spool=(()=>{
     let closeModal=null;
     function renderModal(){
       const cn=(PALETTE.find(p=>p[0].toLowerCase()===sp.color.toLowerCase())||[0,'Custom'])[1];
+      const wCur=Math.round(sp.weight??1000),wCap=Math.round(sp.cap||1000);
       m.innerHTML=`<div class="row" style="align-items:center;margin-bottom:10px">
         <b style="font-size:16px;color:#FFF">⚙ ${sp.name.toUpperCase()} SETTINGS</b>
         <span class="grow"></span>
-        <span class="cmd" style="font-size:12px">${sp.type} • ${cn} • ${sp.nozzle}°C / ${sp.bed}°C</span>
+        <span class="cmd" style="font-size:12px">${sp.type} • ${cn} • ${sp.nozzle}°C / ${sp.bed}°C • ${wCur}g</span>
         <button class="btn sm" id="sm-x" style="border-radius:50%;width:30px;height:30px;padding:0">✕</button>
       </div>
       <div class="hdr" style="margin:4px 0">FILAMENT MATERIAL (AUTO-SETS NOZZLE & BED TEMPS)</div>
@@ -36,7 +39,7 @@ App.pages.spool=(()=>{
       <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:8px;justify-items:center;margin-bottom:12px">
         ${PALETTE.map(([h,n])=>`<button class="color-dot" title="${n}" data-mc="${h}" style="width:30px;height:30px;border-radius:15px;background:${h};border:${h.toLowerCase()===sp.color.toLowerCase()?'3px solid #FFF':'1.5px solid rgba(255,255,255,0.28)'}"></button>`).join('')}
       </div>
-      <div class="grid2" style="gap:10px;margin-bottom:12px">
+      <div class="grid2" style="gap:10px;margin-bottom:10px">
         <div class="box row" style="align-items:center;justify-content:space-between;border-color:rgba(255,90,95,0.35)">
           <b style="color:#CBD5E1">Nozzle:</b>
           <button class="btn sm" data-mt="nozzle" data-md="-5">-5°</button>
@@ -49,6 +52,14 @@ App.pages.spool=(()=>{
           <b style="color:#00E5FF;font-size:15px;min-width:60px;text-align:center">${sp.bed} °C</b>
           <button class="btn sm" data-mt="bed" data-md="5">+5°</button>
         </div>
+      </div>
+      <div class="hdr" style="margin:4px 0">REMAINING SPOOL WEIGHT (AUTO-DEDUCTS DURING PRINTS)</div>
+      <div class="box row" style="align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn sm" data-wd="-50">-50g</button>
+        <b style="color:#34D399;font-size:15px;min-width:110px;text-align:center">${wCur}g / ${wCap}g</b>
+        <button class="btn sm" data-wd="50">+50g</button>
+        <span class="grow"></span>
+        ${[[1000,'Full 1kg'],[750,'750g'],[500,'500g'],[250,'250g']].map(([w,l])=>`<button class="btn sm ${wCur===w?'pri':''}" data-wset="${w}">${l}</button>`).join('')}
       </div>
       <div class="row" style="justify-content:flex-end">
         <button class="btn pri" id="sm-done" style="padding:8px 22px;font-weight:900">✓ Save & Close</button>
@@ -63,6 +74,12 @@ App.pages.spool=(()=>{
       m.querySelectorAll('[data-mt]').forEach(b=>b.onclick=()=>{
         const k=b.dataset.mt;sp[k]=Math.max(0,Math.min(k==='bed'?150:350,sp[k]+ +b.dataset.md));save();renderModal();draw();
       });
+      m.querySelectorAll('[data-wd]').forEach(b=>b.onclick=()=>{
+        sp.weight=Math.max(0,Math.min(sp.cap||1000,(sp.weight??1000)+ +b.dataset.wd));save();renderModal();draw();
+      });
+      m.querySelectorAll('[data-wset]').forEach(b=>b.onclick=()=>{
+        sp.weight=+b.dataset.wset;if(sp.weight>sp.cap)sp.cap=sp.weight;save();renderModal();draw();
+      });
     }
     renderModal();
     closeModal=modal(m);
@@ -71,6 +88,10 @@ App.pages.spool=(()=>{
     const sp=spools[slot];const ams=hasAms();
     const cn=(PALETTE.find(p=>p[0].toLowerCase()===sp.color.toLowerCase())||[0,'Custom'])[1];
     const fg=['#FFFFFF','#EAB308'].includes(sp.color.toUpperCase())?'#000':'#fff';
+    const wCur=Math.max(0,Math.round(sp.weight??1000)),wCap=Math.max(100,Math.round(sp.cap||1000));
+    const wPct=Math.min(100,Math.round((wCur/wCap)*100));
+    const metersLeft=Math.round(wCur/2.98);
+    const wCol=wCur<100?'#EF4444':wCur<250?'#F59E0B':'#10B981';
     root.innerHTML=`${ams?`<div class="hdr">AMS / MMU DETECTED — SELECT ACTIVE SPOOL</div><div class="row card" style="padding:8px;margin-bottom:8px">${[1,2,3,4].map(i=>`<button class="btn grow ${i===slot?'on':''}" data-s="${i}" style="text-align:left">● ${spools[i].name} (${spools[i].type})</button>`).join('')}</div>`:''}
     <div class="row" style="align-items:center;margin-bottom:4px"><div class="hdr grow">ACTIVE FILAMENT SPOOL</div><span class="pill info" id="slive">● Nozzle: --</span></div>
     <div class="row" style="align-items:stretch;gap:12px;flex-wrap:wrap">
@@ -93,10 +114,17 @@ App.pages.spool=(()=>{
                 <b style="color:#00E5FF;font-size:15px">${sp.bed} °C</b>
               </div>
             </div>
+            <div class="box col" style="padding:6px 9px;gap:4px;background:rgba(15,23,42,.75)">
+              <div class="row" style="justify-content:space-between;font-size:11px;font-weight:800">
+                <span style="color:#94A3B8">REMAINING FILAMENT</span>
+                <span id="sw-lbl" style="color:${wCol}">${wCur}g / ${wCap}g (~${metersLeft}m • ${wPct}%)</span>
+              </div>
+              <div class="bar" style="height:6px"><i id="sw-bar" style="width:${wPct}%;background:${wCol}"></i></div>
+            </div>
           </div>
         </div>
         <div style="background:rgba(0,229,255,0.1);border:1px dashed rgba(0,229,255,0.45);border-radius:8px;padding:7px;text-align:center;color:#7DD3FC;font-size:11.5px;font-weight:800;margin-top:10px">
-          ⚙ Tap Spool Card to Change Material, Colour & Temperatures
+          ⚙ Tap Spool Card to Change Material, Colour, Temps & Weight
         </div>
       </div>
       <div class="col grow" style="flex:1;min-width:260px;gap:10px">
@@ -118,7 +146,7 @@ App.pages.spool=(()=>{
         </div>
       </div>
     </div>
-    <div class="sub" id="sstat" style="text-align:center;margin-top:6px">Touch the Spool card to configure filament type, colour, and preset temperatures.</div>`;
+    <div class="sub" id="sstat" style="text-align:center;margin-top:6px">Touch the Spool card to configure filament type, colour, weight, and preset temperatures.</div>`;
     root.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{slot=+b.dataset.s;draw()});
     $('#spool-card-tap',root).onclick=openSpoolSettings;
     root.querySelectorAll('[data-l]').forEach(b=>b.onclick=()=>{dist=+b.dataset.l;draw()});
@@ -128,7 +156,24 @@ App.pages.spool=(()=>{
     $('#sext').onclick=()=>man(dist);$('#sret').onclick=()=>man(-dist);
     $('#sload').onclick=()=>filamentDialog('load',sp);$('#sunl').onclick=()=>filamentDialog('unload',sp);
   }
-  MR.on('status',s=>{const b=$('#slive');if(!b)return;const e=s.extruder||{},c=e.temperature||0,t=e.target||0;
+  MR.on('status',s=>{
+    const ps=s.print_stats||{};
+    const filMm=ps.filament_used||0;
+    if(ps.state==='printing'){
+      if(lastFilMm!==null&&filMm>lastFilMm){
+        const dMm=filMm-lastFilMm;
+        const dGrams=dMm*0.00298;
+        const sp=spools[slot];
+        if(sp){
+          sp.weight=Math.max(0,(sp.weight??1000)-dGrams);
+          save();
+        }
+      }
+      lastFilMm=filMm;
+    }else if(ps.state==='standby'||ps.state==='complete'||ps.state==='cancelled'){
+      lastFilMm=null;
+    }
+    const b=$('#slive');if(!b)return;const e=s.extruder||{},c=e.temperature||0,t=e.target||0;
     if(c>=180){b.className='pill bad';b.textContent=`🔥 Nozzle: ${c.toFixed(1)}°C${t?' / '+Math.round(t)+'°C':''} (HOT)`}
     else if(t>0){b.className='pill';b.textContent=`🔥 Heating Nozzle: ${c.toFixed(1)}°C → ${Math.round(t)}°C`}
     else{b.className='pill info';b.textContent=`● Nozzle: ${c.toFixed(1)}°C (Idle)`}});

@@ -155,6 +155,86 @@ function preheat(kind,onSet){
   $('#p-plus',n).onclick=()=>{t=Math.min(max,t+step);MR.setTemp(kind==='nozzle'?'extruder':'heater_bed',t);upd()};
   $('#px',n).onclick=$('#pcan',n).onclick=close;$('#pc',n).onclick=()=>apply(0);$('#pa',n).onclick=()=>apply(t);upd();
 }
+/* ---- Audio Chime, Push Notifications & Screen Sleep Timer ---- */
+App.playAlertChime=function(kind='complete'){
+  if(localStorage.getItem('chime_enabled')==='0')return;
+  try{
+    const Ctx=window.AudioContext||window.webkitAudioContext;
+    if(!Ctx)return;
+    const ctx=new Ctx();
+    const notes=kind==='error'?[330,262,220]:kind==='paused'?[440,554]:[523.25,659.25,783.99,1046.5];
+    notes.forEach((freq,i)=>{
+      const osc=ctx.createOscillator(),g=ctx.createGain();
+      osc.type=kind==='error'?'sawtooth':'sine';
+      osc.frequency.value=freq;
+      g.gain.setValueAtTime(0.001,ctx.currentTime+i*0.13);
+      g.gain.exponentialRampToValueAtTime(0.18,ctx.currentTime+i*0.13+0.03);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+i*0.13+0.28);
+      osc.connect(g);g.connect(ctx.destination);
+      osc.start(ctx.currentTime+i*0.13);
+      osc.stop(ctx.currentTime+i*0.13+0.3);
+    });
+  }catch(e){}
+};
+App.sendPushAlert=function(title,body){
+  if(localStorage.getItem('notif_enabled')==='0')return;
+  try{
+    if('Notification' in window && Notification.permission==='granted'){
+      new Notification(title,{body});
+    }
+  }catch(e){}
+};
+(function initSleepTimer(){
+  let sleepTimer=null,sleeping=false,sleepEl=null;
+  const updateSleepStats=()=>{
+    if(!sleeping||!sleepEl)return;
+    const d=new Date();
+    const clk=$('#slp-clock',sleepEl);
+    if(clk)clk.textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+    const s=stat();
+    const noz=Math.round(s.extruder?.temperature||0),bed=Math.round(s.heater_bed?.temperature||0);
+    const ps=s.print_stats||{},vs=s.virtual_sdcard||{};
+    const st=(ps.state||'standby').toUpperCase();
+    const pct=Math.round((vs.progress||0)*100);
+    const inf=$('#slp-info',sleepEl);
+    if(inf)inf.innerHTML=`<span>🔥 Nozzle ${noz}°C</span><span>•</span><span>🛏 Bed ${bed}°C</span><span>•</span><span style="color:#00E5FF">${st}${ps.state==='printing'?` (${pct}%)`:''}</span>`;
+  };
+  App.enterSleep=()=>{
+    if(sleeping)return;
+    sleeping=true;
+    if(!sleepEl){
+      sleepEl=el(`<div id="sleep-overlay" style="position:fixed;inset:0;z-index:99999;background:#020409;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;user-select:none">
+        <div id="slp-clock" class="mono" style="font-size:74px;font-weight:900;color:rgba(248,250,252,.28);letter-spacing:4px">--:--</div>
+        <div id="slp-info" class="row mono" style="gap:14px;font-size:16px;font-weight:700;color:rgba(148,163,184,.45);margin-top:10px"></div>
+        <div style="margin-top:28px;font-size:12px;font-weight:700;color:rgba(100,116,139,.35);letter-spacing:1.5px">🌙 LOW-POWER SLEEP MODE • TAP ANYWHERE TO WAKE</div>
+      </div>`);
+      sleepEl.onclick=e=>{e.stopPropagation();App.wakeSleep();};
+      document.body.appendChild(sleepEl);
+    }
+    sleepEl.style.display='flex';
+    updateSleepStats();
+  };
+  App.wakeSleep=()=>{
+    if(sleeping){
+      sleeping=false;
+      if(sleepEl)sleepEl.style.display='none';
+    }
+    App.resetSleepTimer();
+  };
+  App.resetSleepTimer=()=>{
+    clearTimeout(sleepTimer);
+    const mins=+(localStorage.getItem('sleep_timeout_min')??10);
+    if(mins>0){
+      sleepTimer=setTimeout(()=>App.enterSleep(),mins*60*1000);
+    }
+  };
+  ['pointerdown','keydown','wheel','touchstart'].forEach(ev=>{
+    window.addEventListener(ev,()=>{if(sleeping)App.wakeSleep();else App.resetSleepTimer();},{passive:true});
+  });
+  setInterval(updateSleepStats,2000);
+  setTimeout(()=>App.resetSleepTimer(),1000);
+})();
+
 /* ---- Connection / boot ---- */
 MR.on('connection',ok=>{const c=$('#conn');c.className='pill '+(ok?'ok':'bad');c.textContent=ok?'● '+(MR.base||'').replace(/^https?:\/\//,''):'● Offline'});
 MR.on('status',s=>{
@@ -166,7 +246,21 @@ MR.on('status',s=>{
   }
   const ps=s.print_stats;
   if(ps&&ps.state!==App._lastState){const prev=App._lastState;App._lastState=ps.state;
-    if((ps.state==='printing'||ps.state==='paused')&&prev!==undefined)go('printing');
+    if(prev!==undefined){
+      App.wakeSleep?.();
+      if(ps.state==='printing'||ps.state==='paused')go('printing');
+      if(ps.state==='complete'){
+        App.playAlertChime('complete');
+        App.sendPushAlert('✅ Print Complete!',`${ps.filename||'Your print'} has finished printing.`);
+        toast('✅ Print Complete!');
+      }else if(ps.state==='error'){
+        App.playAlertChime('error');
+        App.sendPushAlert('⚠ Printer Error',ps.message||'A print error occurred.');
+      }else if(ps.state==='paused'&&prev==='printing'){
+        App.playAlertChime('paused');
+        App.sendPushAlert('⏸ Print Paused',`${ps.filename||'Print'} is paused.`);
+      }
+    }
     App.pages.printing?.onState?.(ps.state)}
 });
 const SUB_ROUTES = {
