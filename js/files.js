@@ -1027,7 +1027,7 @@ App.pages.files=(()=>{
 
 /* ---- Printing ---- */
 App.pages.printing=(()=>{
-  const root=$('#p-printing');let z0=0,babysteps=0,curFileMeta=null;
+  const root=$('#p-printing');let z0=0,babysteps=0,printBabystep=0,curFileMeta=null;
   root.innerHTML=`
    <div class="print-custom-bar">
      <div style="display:flex;align-items:center;gap:8px;color:#94A3B8;font-weight:700">
@@ -1638,13 +1638,34 @@ App.pages.printing=(()=>{
     App._camStart=start;
   })();
   const dur=s=>{s=Math.max(0,Math.round(s));return`${Math.floor(s/3600)}h ${String(Math.floor(s%3600/60)).padStart(2,'0')}m`};
-  root.querySelectorAll('[data-z]').forEach(b=>b.onclick=()=>{MR.babystep(+b.dataset.z);babysteps++;z0+=+b.dataset.z;upd()});
+  root.querySelectorAll('[data-z]').forEach(b=>b.onclick=()=>{MR.babystep(+b.dataset.z);babysteps++;z0+=+b.dataset.z;printBabystep=z0;upd()});
   const upd=()=>{$('#pz').textContent=(z0>=0?'+':'')+z0.toFixed(3)+' mm';$('#pbs').textContent='Baby steps added: '+babysteps};
   $('#ppause').onclick=()=>{const st=stat().print_stats?.state;st==='paused'?MR.resume():MR.pause()};
   $('#pexclude').onclick=excludeObjectModal;
   $('#pcancel').onclick=()=>confirmBox('Cancel print?','This will stop the print and turn off the heaters.','Cancel Print',()=>MR.cancel(),true);
   $('#ptune').onclick=fineTune;
-  $('#psave').onclick=async()=>{await MR.gcode('Z_OFFSET_APPLY_PROBE');await MR.saveConfig();toast('Z-offset saved')};
+  $('#psave').onclick=async()=>{
+    const delta = Math.abs(z0) > 0.0001 ? z0 : printBabystep;
+    if (Math.abs(delta) < 0.0001) {
+      toast('No Z-offset babystep to save');
+      return;
+    }
+    $('#psave').disabled = true;
+    $('#psave').textContent = 'Saving & Restarting…';
+    try {
+      await MR.gcode(`SET_GCODE_OFFSET Z=${delta >= 0 ? '+' : ''}${delta.toFixed(4)} MOVE=0`);
+      await MR.gcode('Z_OFFSET_APPLY_PROBE');
+      await MR.saveConfig();
+      toast(`Z-Offset (${(delta >= 0 ? '+' : '') + delta.toFixed(3)}mm) saved to printer.cfg!`);
+      printBabystep = 0;
+      z0 = 0;
+      $('#psave').textContent = '✅ Saved to Config';
+    } catch (e) {
+      toast('Save failed: ' + (e.message || e));
+      $('#psave').disabled = false;
+      $('#psave').textContent = 'Save Z-Offset';
+    }
+  };
   $('#phome').onclick=()=>{MR.gcode('SDCARD_RESET_FILE');go('home')};
   let lastFile=null;
   MR.on('status',s=>{
@@ -1714,8 +1735,28 @@ App.pages.printing=(()=>{
     $('#pm-flw').textContent=Math.round((gm.extrude_factor||1)*100)+'%';
     $('#pm-fan').textContent=Math.round((fan.speed||0)*100)+'%';
 
-    if(gm.homing_origin){z0=gm.homing_origin[2];upd();$('#pzo').textContent='Z-Offset '+z0.toFixed(3)}
-    $('#pbtns').style.display=done?'none':'grid';$('#pdone').style.display=done?'grid':'none';
+    if(gm.homing_origin){
+      const liveZ = gm.homing_origin[2] || 0;
+      if (Math.abs(liveZ) > 0.0001) { z0 = liveZ; printBabystep = liveZ; }
+      else if (state === 'printing' || state === 'paused') { z0 = liveZ; }
+      upd();
+      $('#pzo').textContent='Z-Offset '+z0.toFixed(3);
+    }
+    if (state === 'starting') { printBabystep = 0; z0 = 0; babysteps = 0; }
+    $('#pbtns').style.display=done?'none':'grid';
+    $('#pdone').style.display=done?'grid':'none';
+    if (done) {
+      const eff = Math.abs(z0) > 0.0001 ? z0 : printBabystep;
+      if (Math.abs(eff) > 0.0001) {
+        $('#psave').textContent = `Save Z-Offset (${eff >= 0 ? '+' : ''}${eff.toFixed(3)}mm)`;
+        $('#psave').disabled = false;
+        $('#psave').className = 'btn xl green';
+      } else {
+        $('#psave').textContent = 'Z-Offset Unchanged';
+        $('#psave').disabled = true;
+        $('#psave').className = 'btn xl';
+      }
+    }
     $('#ppause').textContent=state==='paused'?'▶ Resume':'⏸ Pause';
 
     const isExt = (state === 'printing') && ((gm.extrude_factor || 1) > 0);
