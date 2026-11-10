@@ -272,6 +272,7 @@ function filamentDialog(mode,sp){
 App.pages.power=(()=>{
   const root=$('#p-power');
   const defs=[['KLIPPER SERVICE & HARDWARE'],['reload','Klipper Restart','Reload Python service & config.','RESTART',()=>MR.restart()],['restart','Firmware Restart','Reload config & reconnect MCU.','FIRMWARE',()=>MR.fwRestart()],
+   ['restart','Restart Screen Display','Restart Klipper touchscreen display service (klipper-display).','RESTART SCREEN',()=>MR.post('/machine/services/restart?service=klipper-display')],
    ['HOST SYSTEM (PI)'],['restart','Reboot Host (Pi)','Safely reboot Raspberry Pi system OS.','REBOOT',()=>MR.hostAction('reboot')],['power','Shutdown Host (Pi)','Safely power down Raspberry Pi system OS.','SHUTDOWN',()=>MR.hostAction('shutdown')],
    ['EMERGENCY'],['power','Emergency Stop','Immediately halt all motors & heaters (M112).','M112',async()=>{await MR.estop();setTimeout(()=>MR.fwRestart(),2000)},1]];
   root.innerHTML='<div class="grid2" id="pg"></div>';

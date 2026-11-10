@@ -24,6 +24,9 @@ class MoonrakerClient{
   async post(path,body,timeout){
     const r=await this._fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined},timeout||10000);
     return (await r.json()).result}
+  async del(path,timeout){
+    const r=await this._fetch(path,{method:'DELETE'},timeout||10000);
+    return (await r.json()).result}
   async connect(){
     if(this._connecting)return;
     this._connecting=true;
@@ -136,6 +139,8 @@ class MoonrakerClient{
   resume(){return this.post('/printer/print/resume')}
   cancel(){return this.post('/printer/print/cancel')}
   startPrint(f){return this.post('/printer/print/start?filename='+encodeURIComponent(f))}
+  getHistory(limit=100){return this.get('/server/history/list?limit='+limit+'&order=desc')}
+  clearHistory(){return this.del('/server/history/job?all=true')}
   saveConfig(){return this.gcode('SAVE_CONFIG',30000)}
   hasLoadCellProbe(){return Boolean(this.config?.load_cell_probe||this.objects.includes('load_cell_probe'))}
   tareGcode(){return this.hasLoadCellProbe()?'G4 P250\nLOAD_CELL_TARE\nG4 P100\n':''}
