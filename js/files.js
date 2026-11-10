@@ -1529,113 +1529,423 @@ App.pages.printing=(()=>{
   $('#pt-nozzle',root).onclick=()=>preheat('nozzle');
   $('#pt-bed',root).onclick=()=>preheat('bed');
   (function cam(){
-    const img=$('#camimg'),st=$('#camst'),empty=$('#camempty');let timer=null,curSnapUrl=null;
-    const getCamTf=()=>{
-      const fh=localStorage.getItem('cam_fliph')==='1';
-      const fv=localStorage.getItem('cam_flipv')==='1';
-      const r180=localStorage.getItem('cam_rot180')==='1';
-      const sx=(fh?-1:1)*(r180?-1:1);
-      const sy=(fv?-1:1)*(r180?-1:1);
-      return `scale(${sx},${sy})`;
+    const img=$('#camimg'),st=$('#camst'),empty=$('#camempty');let timer=null,curSnapUrl=null,curStreamUrl=null;
+
+    const getCamTf = () => {
+      const fh = localStorage.getItem('cam_fliph') === '1';
+      const fv = localStorage.getItem('cam_flipv') === '1';
+      const rot = +(localStorage.getItem('cam_rot') ?? (localStorage.getItem('cam_rot180') === '1' ? 180 : 0));
+      const sx = fh ? -1 : 1;
+      const sy = fv ? -1 : 1;
+      return `rotate(${rot}deg) scale(${sx}, ${sy})`;
     };
-    const applyTf=()=>{if(img)img.style.transform=getCamTf()};
-    applyTf();
-    const absURL=u=>{if(!u)return null;if(/^https?:/.test(u))return u;const b=new URL(MR.base);
-      return (u.startsWith('/')?(b.port&&b.port!=='7125'?b.origin:b.protocol+'//'+b.hostname):b.origin)+(u.startsWith('/')?'':'/')+u};
-    async function start(){
-      clearInterval(timer);let url=localStorage.getItem('webcam_url'),snap=null;
-      if(!url&&MR.connected){try{const r=await MR.get('/server/webcams/list');const w=(r.webcams||[]).find(x=>x.enabled!==false);
-        if(w){url=absURL(w.stream_url);snap=absURL(w.snapshot_url)}}catch(e){}}
-      curSnapUrl=snap||(url?url.replace('action=stream','action=snapshot'):null);
-      if(!url){empty.style.display='flex';img.style.display='none';st.textContent='no camera';return}
-      empty.style.display='none';img.style.display='block';st.textContent=url.replace(/^https?:\/\//,'');
-      applyTf();
-      img.onerror=()=>{if(snap){st.textContent='snapshot mode';img.onerror=null;const t=()=>img.src=snap+(snap.includes('?')?'&':'?')+'t='+Date.now();t();timer=setInterval(t,1000)}else st.textContent='stream error'};
-      img.src=url;
+
+    const getCamFilter = () => {
+      const b = +(localStorage.getItem('cam_bright') ?? 100);
+      const c = +(localStorage.getItem('cam_contrast') ?? 100);
+      const s = +(localStorage.getItem('cam_saturate') ?? 100);
+      const inv = localStorage.getItem('cam_invert') === '1' ? 100 : 0;
+      const sharp = localStorage.getItem('cam_sharp') || '0';
+      let extra = '';
+      if (sharp === '1') extra = ' contrast(120%)';
+      if (sharp === '2') extra = ' contrast(140%) saturate(125%)';
+      if (sharp === '3') extra = ' grayscale(100%) contrast(125%)';
+      return `brightness(${b}%) contrast(${c}%) saturate(${s}%) invert(${inv}%)${extra}`;
+    };
+
+    const getCamFit = () => localStorage.getItem('cam_fit') || 'contain';
+
+    const applyCamStyles = (targetEl) => {
+      if (!targetEl) return;
+      targetEl.style.transform = getCamTf();
+      targetEl.style.filter = getCamFilter();
+      targetEl.style.objectFit = getCamFit();
+    };
+
+    const absURL = u => {
+      if (!u) return null;
+      if (/^https?:/.test(u)) return u;
+      const b = new URL(MR.base);
+      return (u.startsWith('/') ? (b.port && b.port !== '7125' ? b.origin : b.protocol + '//' + b.hostname) : b.origin) + (u.startsWith('/') ? '' : '/') + u;
+    };
+
+    async function start() {
+      clearInterval(timer);
+      let url = localStorage.getItem('webcam_url'), snap = localStorage.getItem('webcam_snap_url');
+      if (!url && MR.connected) {
+        try {
+          const r = await MR.get('/server/webcams/list');
+          const w = (r.webcams || []).find(x => x.enabled !== false);
+          if (w) {
+            url = absURL(w.stream_url);
+            snap = absURL(w.snapshot_url);
+          }
+        } catch (e) {}
+      }
+      curStreamUrl = url;
+      curSnapUrl = snap || (url ? url.replace('action=stream', 'action=snapshot') : null);
+      if (!url && !snap) {
+        empty.style.display = 'flex';
+        img.style.display = 'none';
+        st.textContent = 'no camera';
+        return;
+      }
+      empty.style.display = 'none';
+      img.style.display = 'block';
+      applyCamStyles(img);
+
+      const mode = localStorage.getItem('cam_fps_mode') || 'stream';
+      if (mode !== 'stream' && curSnapUrl) {
+        const delay = mode === 'snap1' ? 1000 : mode === 'snap2' ? 2000 : 5000;
+        st.textContent = `snapshot (${delay / 1000}s)`;
+        const loadSnap = () => {
+          img.src = curSnapUrl + (curSnapUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+        };
+        loadSnap();
+        timer = setInterval(loadSnap, delay);
+      } else {
+        st.textContent = (url || snap).replace(/^https?:\/\//, '');
+        img.onerror = () => {
+          if (curSnapUrl) {
+            st.textContent = 'fallback 1s';
+            img.onerror = null;
+            const t = () => { img.src = curSnapUrl + (curSnapUrl.includes('?') ? '&' : '?') + 't=' + Date.now(); };
+            t();
+            timer = setInterval(t, 1000);
+          } else {
+            st.textContent = 'stream error';
+          }
+        };
+        img.src = url || curSnapUrl;
+      }
     }
-    const takeSnapshot=()=>{
-      if(img&&img.naturalWidth>0){
-        try{
-          const cv=document.createElement('canvas');
-          cv.width=img.naturalWidth;cv.height=img.naturalHeight;
-          const ctx=cv.getContext('2d');
-          const fh=localStorage.getItem('cam_fliph')==='1';
-          const fv=localStorage.getItem('cam_flipv')==='1';
-          const r180=localStorage.getItem('cam_rot180')==='1';
-          const sx=(fh?-1:1)*(r180?-1:1),sy=(fv?-1:1)*(r180?-1:1);
-          ctx.translate(sx<0?cv.width:0,sy<0?cv.height:0);
-          ctx.scale(sx,sy);
-          ctx.drawImage(img,0,0);
-          cv.toBlob(b=>{
-            if(!b)return;
-            const u=URL.createObjectURL(b);
-            const a=document.createElement('a');
-            a.href=u;a.download=`klipper-snapshot-${new Date().toISOString().replace(/[:.]/g,'-')}.png`;
-            a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);
-            toast('📸 Snapshot downloaded');
+
+    const takeSnapshot = () => {
+      if (img && img.naturalWidth > 0) {
+        try {
+          const cv = document.createElement('canvas');
+          const rot = +(localStorage.getItem('cam_rot') ?? (localStorage.getItem('cam_rot180') === '1' ? 180 : 0));
+          const fh = localStorage.getItem('cam_fliph') === '1';
+          const fv = localStorage.getItem('cam_flipv') === '1';
+          const isSwapped = rot === 90 || rot === 270;
+          cv.width = isSwapped ? img.naturalHeight : img.naturalWidth;
+          cv.height = isSwapped ? img.naturalWidth : img.naturalHeight;
+          const ctx = cv.getContext('2d');
+          try { ctx.filter = getCamFilter(); } catch(e){}
+          ctx.translate(cv.width / 2, cv.height / 2);
+          ctx.rotate((rot * Math.PI) / 180);
+          ctx.scale(fh ? -1 : 1, fv ? -1 : 1);
+          ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+          cv.toBlob(b => {
+            if (!b) return;
+            const u = URL.createObjectURL(b);
+            const a = document.createElement('a');
+            a.href = u;
+            a.download = `klipper-cam-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(u), 2000);
+            toast('📸 Snapshot saved (with tuning & rotation)');
           });
           return;
-        }catch(e){}
+        } catch (e) {
+          console.warn('Canvas capture fallback:', e);
+        }
       }
-      if(curSnapUrl){
-        window.open(curSnapUrl,'_blank');
+      if (curSnapUrl) {
+        window.open(curSnapUrl, '_blank');
         toast('📸 Opened camera snapshot');
-      }else{
+      } else {
         toast('⚠ No active camera frame to capture');
       }
     };
-    const openCamModal=()=>{
-      let fh=localStorage.getItem('cam_fliph')==='1';
-      let fv=localStorage.getItem('cam_flipv')==='1';
-      let r180=localStorage.getItem('cam_rot180')==='1';
-      const n=el(`<div class="dlg" style="max-width:740px;border:1.5px solid rgba(0,229,255,.45)">
+
+    const openCamStudio = (initialTab = 'tune') => {
+      let activeTab = initialTab;
+      let fh = localStorage.getItem('cam_fliph') === '1';
+      let fv = localStorage.getItem('cam_flipv') === '1';
+      let rot = +(localStorage.getItem('cam_rot') ?? (localStorage.getItem('cam_rot180') === '1' ? 180 : 0));
+      let fit = getCamFit();
+      let bright = +(localStorage.getItem('cam_bright') ?? 100);
+      let contrast = +(localStorage.getItem('cam_contrast') ?? 100);
+      let saturate = +(localStorage.getItem('cam_saturate') ?? 100);
+      let invert = localStorage.getItem('cam_invert') === '1';
+      let sharp = localStorage.getItem('cam_sharp') || '0';
+      let fpsMode = localStorage.getItem('cam_fps_mode') || 'stream';
+
+      const n = el(`<div class="dlg" style="max-width:760px;width:95vw;border:1.5px solid rgba(0,229,255,.45);padding:14px 18px">
         <div class="row" style="align-items:center;margin-bottom:8px">
-          <b class="hico" style="color:#00E5FF">${CICON('camera')} CAMERA MONITOR &ORIENTATION</b>
+          <b class="hico" style="color:#00E5FF;font-size:15px">${CICON('camera')} WEBCAM STUDIO & CONTROLS</b>
           <span class="grow"></span>
-          <button class="btn sm pri" id="cm-snap">📸 Save Snapshot</button>
-          <button class="btn sm" id="cm-native-fs">⛶ Native Fullscreen</button>
-          <button class="x" id="cm-x">✕</button>
+          <button class="btn sm pri" id="cs-snap">📸 Snap</button>
+          <button class="btn sm" id="cs-native-fs">⛶ Fullscreen</button>
+          <button class="x" id="cs-x">✕</button>
         </div>
-        <div id="cm-view" style="height:360px;background:#050811;border-radius:12px;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative">
-          ${img&&img.src&&img.style.display!=='none'?`<img id="cm-img" src="${img.src}" style="max-width:100%;max-height:100%;object-fit:contain;transform:${getCamTf()}">`:`<div class="sub">No active webcam stream (${st.textContent})</div>`}
+        
+        <!-- Live Preview Stage -->
+        <div id="cs-view" style="height:320px;background:#050811;border-radius:12px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative">
+          ${img && img.src && img.style.display !== 'none' ? `<img id="cs-img" src="${img.src}" style="max-width:100%;max-height:100%;object-fit:${fit}">` : `<div class="sub">No active webcam stream (${st.textContent})</div>`}
+          <div style="position:absolute;bottom:8px;left:10px;background:rgba(0,0,0,.65);padding:3px 8px;border-radius:6px;font-size:11px;color:#A0AEC0;backdrop-filter:blur(4px)" id="cs-overlay-badge">
+            ROT: ${rot}° | ${fh ? 'FLIP-H ' : ''}${fv ? 'FLIP-V ' : ''}| FIT: ${fit.toUpperCase()}
+          </div>
         </div>
-        <div class="row" style="margin-top:10px;gap:8px;align-items:center;flex-wrap:wrap">
-          <span class="sub" style="font-weight:800">ORIENTATION:</span>
-          <button class="btn sm ${fh?'on':''}" id="cm-fh">↔ Flip Horizontal</button>
-          <button class="btn sm ${fv?'on':''}" id="cm-fv">↕ Flip Vertical</button>
-          <button class="btn sm ${r180?'on':''}" id="cm-r180">⟳ Rotate 180°</button>
-          <span class="grow"></span>
-          <button class="btn sm" id="cm-url">⚙ Stream URL</button>
+
+        <!-- Navigation Tabs -->
+        <div class="row" style="gap:6px;margin:12px 0 8px 0;border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:8px;flex-wrap:wrap">
+          <button class="btn sm ${activeTab === 'tune' ? 'on' : ''}" data-tab="tune" style="font-weight:800">🎨 Picture Tuning</button>
+          <button class="btn sm ${activeTab === 'orient' ? 'on' : ''}" data-tab="orient" style="font-weight:800">🔄 Flip & Rotate</button>
+          <button class="btn sm ${activeTab === 'res' ? 'on' : ''}" data-tab="res" style="font-weight:800">📐 Sizing & FPS</button>
+          <button class="btn sm ${activeTab === 'url' ? 'on' : ''}" data-tab="url" style="font-weight:800">⚙ Stream URL</button>
+        </div>
+
+        <!-- Tab 1: Picture Tuning -->
+        <div id="tab-tune" style="display:${activeTab === 'tune' ? 'block' : 'none'};margin-top:6px">
+          <div class="grid2" style="gap:12px">
+            <div class="box" style="padding:10px">
+              <div class="row" style="justify-content:space-between;margin-bottom:4px">
+                <span style="font-size:12.5px;font-weight:700">☀️ Brightness</span>
+                <span class="sub" id="lbl-bright" style="font-weight:800;color:#00E5FF">${bright}%</span>
+              </div>
+              <input type="range" id="rng-bright" min="50" max="150" value="${bright}" style="width:100%">
+            </div>
+            <div class="box" style="padding:10px">
+              <div class="row" style="justify-content:space-between;margin-bottom:4px">
+                <span style="font-size:12.5px;font-weight:700">🌓 Contrast</span>
+                <span class="sub" id="lbl-contrast" style="font-weight:800;color:#00E5FF">${contrast}%</span>
+              </div>
+              <input type="range" id="rng-contrast" min="50" max="150" value="${contrast}" style="width:100%">
+            </div>
+            <div class="box" style="padding:10px">
+              <div class="row" style="justify-content:space-between;margin-bottom:4px">
+                <span style="font-size:12.5px;font-weight:700">🌈 Saturation</span>
+                <span class="sub" id="lbl-saturate" style="font-weight:800;color:#00E5FF">${saturate}%</span>
+              </div>
+              <input type="range" id="rng-saturate" min="0" max="200" value="${saturate}" style="width:100%">
+            </div>
+            <div class="box" style="padding:10px;display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <b style="font-size:12.5px">🌙 Invert / Night View</b>
+                <div class="sub" style="font-size:11px">Negative color profile for dark areas</div>
+              </div>
+              <button class="btn sm ${invert ? 'on' : ''}" id="btn-invert" style="min-width:70px;font-weight:800">${invert ? 'ON' : 'OFF'}</button>
+            </div>
+          </div>
+          <div class="row" style="align-items:center;gap:6px;margin-top:10px;flex-wrap:wrap">
+            <span class="sub" style="font-weight:800;font-size:11.5px">PRESETS:</span>
+            <button class="btn sm ${sharp === '0' && !invert && bright === 100 && contrast === 100 && saturate === 100 ? 'on' : ''}" id="pre-def">Normal</button>
+            <button class="btn sm ${sharp === '1' ? 'on' : ''}" id="pre-crisp">Crisp Detail</button>
+            <button class="btn sm ${sharp === '2' ? 'on' : ''}" id="pre-vivid">Vivid Color</button>
+            <button class="btn sm ${sharp === '3' ? 'on' : ''}" id="pre-mono">Monochrome B&W</button>
+            <span class="grow"></span>
+            <button class="btn sm" id="btn-reset-tune" style="color:#F87171">↺ Reset to Default</button>
+          </div>
+        </div>
+
+        <!-- Tab 2: Flip & Rotate -->
+        <div id="tab-orient" style="display:${activeTab === 'orient' ? 'block' : 'none'};margin-top:6px">
+          <div class="col" style="gap:10px">
+            <div class="box" style="padding:10px">
+              <div style="font-weight:800;font-size:12px;color:#A0AEC0;margin-bottom:8px">ROTATION ANGLE:</div>
+              <div class="row" style="gap:8px;flex-wrap:wrap">
+                <button class="btn ${rot === 0 ? 'on' : ''}" data-rot="0" style="flex:1;min-width:65px">0° (Upright)</button>
+                <button class="btn ${rot === 90 ? 'on' : ''}" data-rot="90" style="flex:1;min-width:65px">90° CW</button>
+                <button class="btn ${rot === 180 ? 'on' : ''}" data-rot="180" style="flex:1;min-width:65px">180° Inverted</button>
+                <button class="btn ${rot === 270 ? 'on' : ''}" data-rot="270" style="flex:1;min-width:65px">270° CCW</button>
+                <button class="btn" id="btn-rot-step" title="Rotate +90 degrees">⟳ +90°</button>
+              </div>
+            </div>
+            <div class="box" style="padding:10px">
+              <div style="font-weight:800;font-size:12px;color:#A0AEC0;margin-bottom:8px">MIRRORING & FLIPPING:</div>
+              <div class="row" style="gap:10px">
+                <button class="btn ${fh ? 'on' : ''}" id="btn-fh" style="flex:1;font-weight:800">↔ Flip Horizontal (Mirror X)</button>
+                <button class="btn ${fv ? 'on' : ''}" id="btn-fv" style="flex:1;font-weight:800">↕ Flip Vertical (Mirror Y)</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Sizing & FPS -->
+        <div id="tab-res" style="display:${activeTab === 'res' ? 'block' : 'none'};margin-top:6px">
+          <div class="col" style="gap:10px">
+            <div class="box" style="padding:10px">
+              <div style="font-weight:800;font-size:12px;color:#A0AEC0;margin-bottom:8px">FRAME SIZING & FIT:</div>
+              <div class="row" style="gap:8px">
+                <button class="btn ${fit === 'contain' ? 'on' : ''}" data-fit="contain" style="flex:1">⏹ Contain (1:1 Ratio)</button>
+                <button class="btn ${fit === 'cover' ? 'on' : ''}" data-fit="cover" style="flex:1">⛶ Cover (Fill Box)</button>
+                <button class="btn ${fit === 'fill' ? 'on' : ''}" data-fit="fill" style="flex:1">↔ Stretch Full</button>
+              </div>
+            </div>
+            <div class="box" style="padding:10px">
+              <div style="font-weight:800;font-size:12px;color:#A0AEC0;margin-bottom:8px">STREAM MODE & BANDWIDTH:</div>
+              <div class="row" style="gap:8px">
+                <button class="btn ${fpsMode === 'stream' ? 'on' : ''}" data-fps="stream" style="flex:1">⚡ Full Video (MJPEG)</button>
+                <button class="btn ${fpsMode === 'snap1' ? 'on' : ''}" data-fps="snap1" style="flex:1">🍃 Eco (1 FPS)</button>
+                <button class="btn ${fpsMode === 'snap2' ? 'on' : ''}" data-fps="snap2" style="flex:1">⏱ 2 Sec Interval</button>
+                <button class="btn ${fpsMode === 'snap5' ? 'on' : ''}" data-fps="snap5" style="flex:1">🐢 5 Sec Saver</button>
+              </div>
+            </div>
+            <div class="box" style="padding:10px;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.2)">
+              <div style="font-weight:800;font-size:12px;color:#00E5FF;margin-bottom:4px">CAMERA SENSOR & RESOLUTION INFO:</div>
+              <div class="sub" style="font-size:12px;line-height:1.5">
+                • <b>Sensor:</b> Raspberry Pi Camera Module (OV5647 5-Megapixel CSI)<br>
+                • <b>Native Formats:</b> 2592×1944 (Full 5MP) • 1296×972 (4:3 Stream Default) • 1280×720 (16:9 HD)<br>
+                • <b>Streamer Daemon:</b> camera-streamer on port 8080 (Hardware YUYV capture)
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Stream URL -->
+        <div id="tab-url" style="display:${activeTab === 'url' ? 'block' : 'none'};margin-top:6px">
+          <div class="col" style="gap:8px">
+            <div class="sub">Primary Video Stream URL (MJPEG / H264):</div>
+            <input id="in-stream-url" style="width:100%" value="${localStorage.getItem('webcam_url') || ''}" placeholder="e.g. /webcam/?action=stream or http://192.168.0.99:8080/?action=stream">
+            <div class="sub">Direct Snapshot URL (Optional fallback):</div>
+            <input id="in-snap-url" style="width:100%" value="${localStorage.getItem('webcam_snap_url') || ''}" placeholder="e.g. /webcam/?action=snapshot or http://192.168.0.99:8080/?action=snapshot">
+            <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">
+              <button class="btn sm" id="btn-pre-proxy">Use /webcam/ Proxy</button>
+              <button class="btn sm" id="btn-pre-8080">Use Port 8080 Direct</button>
+              <button class="btn sm" id="btn-auto-moonraker">🔍 Auto-Detect Moonraker</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="row" style="justify-content:flex-end;margin-top:14px;gap:8px;border-top:1px solid rgba(255,255,255,.1);padding-top:10px">
+          <button class="btn" id="cs-close">Close</button>
+          <button class="btn pri" id="cs-save" style="font-weight:800">✓ Apply & Save</button>
         </div>
       </div>`);
-      const cl=modal(n);
-      const syncModalTf=()=>{
-        localStorage.setItem('cam_fliph',fh?'1':'0');
-        localStorage.setItem('cam_flipv',fv?'1':'0');
-        localStorage.setItem('cam_rot180',r180?'1':'0');
-        applyTf();
-        const mImg=$('#cm-img',n);
-        if(mImg)mImg.style.transform=getCamTf();
-        $('#cm-fh',n).classList.toggle('on',fh);
-        $('#cm-fv',n).classList.toggle('on',fv);
-        $('#cm-r180',n).classList.toggle('on',r180);
+
+      const cl = modal(n);
+      const mImg = $('#cs-img', n);
+
+      const syncUI = () => {
+        localStorage.setItem('cam_fliph', fh ? '1' : '0');
+        localStorage.setItem('cam_flipv', fv ? '1' : '0');
+        localStorage.setItem('cam_rot', String(rot));
+        localStorage.setItem('cam_rot180', rot === 180 ? '1' : '0');
+        localStorage.setItem('cam_fit', fit);
+        localStorage.setItem('cam_bright', String(bright));
+        localStorage.setItem('cam_contrast', String(contrast));
+        localStorage.setItem('cam_saturate', String(saturate));
+        localStorage.setItem('cam_invert', invert ? '1' : '0');
+        localStorage.setItem('cam_sharp', sharp);
+        localStorage.setItem('cam_fps_mode', fpsMode);
+
+        applyCamStyles(img);
+        applyCamStyles(mImg);
+
+        const badge = $('#cs-overlay-badge', n);
+        if (badge) badge.textContent = `ROT: ${rot}° | ${fh ? 'FLIP-H ' : ''}${fv ? 'FLIP-V ' : ''}| FIT: ${fit.toUpperCase()}`;
+
+        const lb = $('#lbl-bright', n); if (lb) lb.textContent = `${bright}%`;
+        const lc = $('#lbl-contrast', n); if (lc) lc.textContent = `${contrast}%`;
+        const ls = $('#lbl-saturate', n); if (ls) ls.textContent = `${saturate}%`;
+
+        $('#btn-fh', n)?.classList.toggle('on', fh);
+        $('#btn-fv', n)?.classList.toggle('on', fv);
+        $('#btn-invert', n)?.classList.toggle('on', invert);
+        if ($('#btn-invert', n)) $('#btn-invert', n).textContent = invert ? 'ON' : 'OFF';
+
+        n.querySelectorAll('[data-rot]').forEach(b => b.classList.toggle('on', +b.dataset.rot === rot));
+        n.querySelectorAll('[data-fit]').forEach(b => b.classList.toggle('on', b.dataset.fit === fit));
+        n.querySelectorAll('[data-fps]').forEach(b => b.classList.toggle('on', b.dataset.fps === fpsMode));
       };
-      $('#cm-x',n).onclick=cl;
-      $('#cm-snap',n).onclick=takeSnapshot;
-      $('#cm-native-fs',n).onclick=()=>$('#cm-view',n).requestFullscreen?.();
-      $('#cm-fh',n).onclick=()=>{fh=!fh;syncModalTf()};
-      $('#cm-fv',n).onclick=()=>{fv=!fv;syncModalTf()};
-      $('#cm-r180',n).onclick=()=>{r180=!r180;syncModalTf()};
-      $('#cm-url',n).onclick=()=>{cl();$('#camset').click()};
+
+      syncUI();
+
+      n.querySelectorAll('[data-tab]').forEach(btn => {
+        btn.onclick = () => {
+          activeTab = btn.dataset.tab;
+          n.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b === btn));
+          $('#tab-tune', n).style.display = activeTab === 'tune' ? 'block' : 'none';
+          $('#tab-orient', n).style.display = activeTab === 'orient' ? 'block' : 'none';
+          $('#tab-res', n).style.display = activeTab === 'res' ? 'block' : 'none';
+          $('#tab-url', n).style.display = activeTab === 'url' ? 'block' : 'none';
+        };
+      });
+
+      $('#cs-x', n).onclick = $('#cs-close', n).onclick = cl;
+      $('#cs-snap', n).onclick = takeSnapshot;
+      $('#cs-native-fs', n).onclick = () => $('#cs-view', n).requestFullscreen?.();
+
+      $('#rng-bright', n).oninput = e => { bright = +e.target.value; syncUI(); };
+      $('#rng-contrast', n).oninput = e => { contrast = +e.target.value; syncUI(); };
+      $('#rng-saturate', n).oninput = e => { saturate = +e.target.value; syncUI(); };
+      $('#btn-invert', n).onclick = () => { invert = !invert; syncUI(); };
+
+      $('#pre-def', n).onclick = () => { bright = 100; contrast = 100; saturate = 100; invert = false; sharp = '0'; $('#rng-bright', n).value = 100; $('#rng-contrast', n).value = 100; $('#rng-saturate', n).value = 100; syncUI(); };
+      $('#pre-crisp', n).onclick = () => { sharp = '1'; contrast = Math.max(contrast, 115); syncUI(); };
+      $('#pre-vivid', n).onclick = () => { sharp = '2'; saturate = 135; contrast = 115; $('#rng-saturate', n).value = 135; $('#rng-contrast', n).value = 115; syncUI(); };
+      $('#pre-mono', n).onclick = () => { sharp = '3'; saturate = 0; $('#rng-saturate', n).value = 0; syncUI(); };
+      $('#btn-reset-tune', n).onclick = () => { bright = 100; contrast = 100; saturate = 100; invert = false; sharp = '0'; $('#rng-bright', n).value = 100; $('#rng-contrast', n).value = 100; $('#rng-saturate', n).value = 100; syncUI(); toast('Tuning reset to defaults'); };
+
+      n.querySelectorAll('[data-rot]').forEach(b => {
+        b.onclick = () => { rot = +b.dataset.rot; syncUI(); };
+      });
+      $('#btn-rot-step', n).onclick = () => { rot = (rot + 90) % 360; syncUI(); };
+      $('#btn-fh', n).onclick = () => { fh = !fh; syncUI(); };
+      $('#btn-fv', n).onclick = () => { fv = !fv; syncUI(); };
+
+      n.querySelectorAll('[data-fit]').forEach(b => {
+        b.onclick = () => { fit = b.dataset.fit; syncUI(); };
+      });
+      n.querySelectorAll('[data-fps]').forEach(b => {
+        b.onclick = () => { fpsMode = b.dataset.fps; syncUI(); start(); };
+      });
+
+      $('#btn-pre-proxy', n).onclick = () => {
+        $('#in-stream-url', n).value = '/webcam/?action=stream';
+        $('#in-snap-url', n).value = '/webcam/?action=snapshot';
+      };
+      $('#btn-pre-8080', n).onclick = () => {
+        const host = location.hostname || '192.168.0.99';
+        $('#in-stream-url', n).value = `http://${host}:8080/?action=stream`;
+        $('#in-snap-url', n).value = `http://${host}:8080/?action=snapshot`;
+      };
+      $('#btn-auto-moonraker', n).onclick = async () => {
+        toast('🔍 Scanning Moonraker webcams…');
+        try {
+          const r = await MR.get('/server/webcams/list');
+          const w = (r.webcams || []).find(x => x.enabled !== false);
+          if (w) {
+            $('#in-stream-url', n).value = absURL(w.stream_url) || '';
+            $('#in-snap-url', n).value = absURL(w.snapshot_url) || '';
+            toast('✓ Found webcam: ' + (w.name || 'default'));
+          } else {
+            toast('No active webcam reported by Moonraker');
+          }
+        } catch (e) {
+          toast('Failed to query Moonraker webcams');
+        }
+      };
+
+      $('#cs-save', n).onclick = () => {
+        const u = $('#in-stream-url', n).value.trim();
+        const su = $('#in-snap-url', n).value.trim();
+        u ? localStorage.setItem('webcam_url', u) : localStorage.removeItem('webcam_url');
+        su ? localStorage.setItem('webcam_snap_url', su) : localStorage.removeItem('webcam_snap_url');
+        syncUI();
+        start();
+        cl();
+        toast('✓ Camera settings saved');
+      };
     };
-    $('#camsnap').onclick=takeSnapshot;
-    $('#camfs').onclick=openCamModal;
-    $('#cambox').onclick=openCamModal;
-    $('#camset').onclick=()=>{const n=el(`<div class="dlg" style="max-width:480px"><h3>Webcam URL</h3><div class="sub">MJPEG stream, e.g. http://192.168.0.99/webcam/?action=stream — empty = auto-detect from Moonraker</div><input id="cu" style="width:100%;margin:8px 0" value="${localStorage.getItem('webcam_url')||''}"><div class="row" style="justify-content:flex-end"><button class="btn" id="cc2">Cancel</button><button class="btn pri" id="cs2">Save</button></div></div>`);
-      const cl=modal(n);$('#cc2',n).onclick=cl;$('#cs2',n).onclick=()=>{const v=$('#cu',n).value.trim();v?localStorage.setItem('webcam_url',v):localStorage.removeItem('webcam_url');cl();start()}};
-    MR.on('connection',ok=>ok&&start());if(MR.connected)start();
-    document.addEventListener('visibilitychange',()=>{if(document.hidden){img.removeAttribute('src')}else start()});
-    App._camStart=start;
+
+    $('#camsnap').onclick = takeSnapshot;
+    $('#camfs').onclick = () => openCamStudio('orient');
+    $('#cambox').onclick = () => openCamStudio('orient');
+    $('#camset').onclick = () => openCamStudio('tune');
+
+    App.openCamStudio = openCamStudio;
+    window.openCamStudio = openCamStudio;
+
+    MR.on('connection', ok => ok && start());
+    if (MR.connected) start();
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { img.removeAttribute('src'); } else start();
+    });
+    App._camStart = start;
   })();
   const dur=s=>{s=Math.max(0,Math.round(s));return`${Math.floor(s/3600)}h ${String(Math.floor(s%3600/60)).padStart(2,'0')}m`};
   root.querySelectorAll('[data-z]').forEach(b=>b.onclick=()=>{MR.babystep(+b.dataset.z);babysteps++;z0+=+b.dataset.z;printBabystep=z0;upd()});

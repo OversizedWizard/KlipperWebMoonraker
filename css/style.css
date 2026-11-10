@@ -299,7 +299,8 @@ select,input{background:#1E293B;border:1px solid #475569;border-radius:8px;color
 .cam-card{padding:10px!important}
 .cam-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px}
 .cam-box{position:relative;background:#000;border-radius:12px;overflow:hidden;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center}
-.cam-box img{width:100%;height:100%;object-fit:contain;display:none}
+.cam-box img{width:100%;height:100%;object-fit:contain;display:none;transition:filter .1s ease,transform .15s ease}
+input[type=range]{accent-color:var(--cyan);cursor:pointer}
 .cam-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:15px;font-weight:700;gap:4px}
 .print-file{display:flex;gap:14px;align-items:center}
 .print-file .thumb{width:96px;height:96px}

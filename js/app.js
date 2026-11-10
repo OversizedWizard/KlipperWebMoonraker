@@ -2,7 +2,7 @@
 const $=(s,r=document)=>r.querySelector(s);
 const el=(html)=>{const t=document.createElement('div');t.innerHTML=html.trim();return t.firstElementChild};
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(()=>t.style.display='none',2600)}
-const App={pages:{},cur:'',history:[],subStack:null,homedAxes:'',mr:MR};
+const App={pages:{},cur:'',history:[],subStack:null,homedAxes:'',mr:MR}; window.App=App;
 const NAV_TOP=[['home','Home'],['files','Files'],['printing','Print'],['spool','Spool'],['calibrate','Calibrate']];
 const NAV_BOTTOM=[['config','Printer.cfg'],['logs','Logs'],['settings','Settings'],['power','Power']];
 const NAV=[...NAV_TOP,...NAV_BOTTOM];

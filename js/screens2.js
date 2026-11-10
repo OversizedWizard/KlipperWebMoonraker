@@ -122,12 +122,23 @@ App.pages.settings = (() => {
     const c = localStorage.getItem('chime_enabled') !== '0';
     return (n && c) ? 'Push + Chime ON' : n ? 'Push ON' : c ? 'Chime ON' : 'Muted';
   };
+  const getCamBadge = () => {
+    const rot = +(localStorage.getItem('cam_rot') ?? (localStorage.getItem('cam_rot180') === '1' ? 180 : 0));
+    const fh = localStorage.getItem('cam_fliph') === '1';
+    const fv = localStorage.getItem('cam_flipv') === '1';
+    const parts = [];
+    if (rot > 0) parts.push(`${rot}°`);
+    if (fh) parts.push('FLIP-H');
+    if (fv) parts.push('FLIP-V');
+    return parts.length ? parts.join(' • ') : 'STUDIO & TUNING';
+  };
   const draw = () => {
     const cal = ['bed_mesh', 'z_offset', 'probe_cal', 'screws_tilt', 'dual_z_trim', 'probe_acc', 'pid_tune', 'load_cell_weight_test'].filter(supported);
     root.innerHTML = `${cal.length ? '<div class="hdr">BED & PROBE CALIBRATION SHORTCUTS</div><div class="grid2">' + cal.map(k => cardHTML(k, CAL[k])).join('') + '</div>' : ''}
     <div class="hdr">DISPLAY, ALERTS & BACKUP</div><div class="grid2">
      <div class="cc" id="s-sleep">${ICON('clock')}<div><div class="ti">Screen Sleep Timer</div><div class="ds">Auto-dim / low-power sleep screen after inactivity.</div><span class="cmd" id="s-sleep-badge">TIMEOUT: ${getSleepLabel().toUpperCase()}</span></div><span class="ar">›</span></div>
      <div class="cc" id="s-notif">${ICON('info')}<div><div class="ti">Print & Alert Notifications</div><div class="ds">Browser push notifications & audio chime on finish/error.</div><span class="cmd" id="s-notif-badge">${getNotifLabel().toUpperCase()}</span></div><span class="ar">›</span></div>
+     <div class="cc" id="s-cam">${CICON('camera')}<div><div class="ti">Webcam & Camera Controls</div><div class="ds">Live tuning, rotation, flipping, resolution & stream URLs.</div><span class="cmd" id="s-cam-badge">${getCamBadge()}</span></div><span class="ar">›</span></div>
      <div class="cc" id="s-backup">${ICON('folder')}<div><div class="ti">Backup All Configs (.zip)</div><div class="ds">Download printer.cfg, moonraker.conf & macros as a ZIP.</div><span class="cmd">ONE-CLICK ZIP BACKUP</span></div><span class="ar">›</span></div>
      <div class="cc" id="s-host">${ICON('settings')}<div><div class="ti">Moonraker Host</div><div class="ds">${MR.base || 'not connected'}</div><span class="cmd">CONNECTION</span></div><span class="ar">›</span></div>
     </div>
@@ -140,6 +151,15 @@ App.pages.settings = (() => {
     $('#s-tests').onclick = printerTests; $('#s-fw').onclick = sysLoads; $('#s-fix').onclick = healthCheck;
     $('#s-sleep').onclick = openSleepSettings;
     $('#s-notif').onclick = openNotifSettings;
+    $('#s-cam').onclick = () => {
+      if (App.openCamStudio) {
+        App.openCamStudio('tune');
+      } else if (window.openCamStudio) {
+        window.openCamStudio('tune');
+      } else {
+        toast('Camera controls not initialized');
+      }
+    };
     $('#s-backup').onclick = async () => {
       toast('📦 Building config backup (.zip)…');
       try {
