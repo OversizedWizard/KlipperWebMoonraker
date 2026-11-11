@@ -33,6 +33,8 @@ App.pages.config = (() => {
     </div>
     <div class="grow"></div>
     <button class="cfg-btn" id="cfg-backup-zip" title="Download all config files as a .zip archive" style="border-color:rgba(56,189,248,.4);color:#7DD3FC">📦 Backup (.zip)</button>
+    <button class="cfg-btn" id="cfg-upload-restart" title="Upload a config file from your PC and restart Klipper" style="border-color:rgba(16,185,129,.45);color:#6EE7B7">📤 Upload & Restart</button>
+    <input type="file" id="cfg-upload-input" accept=".cfg,.conf,.ini,.json,.txt" style="display:none">
     <button class="cfg-btn reload" id="cfg-reload" title="Discard edits and reload from printer">⟳ Reload</button>
     <button class="cfg-btn pri" id="cfg-save">💾 Save</button>
     <button class="cfg-btn cfg-restart" id="cfg-save-restart">⚡ Save & Restart</button>
@@ -597,6 +599,100 @@ App.pages.config = (() => {
 
   $('#cfg-save', root).onclick = saveOnly;
   $('#cfg-save-restart', root).onclick = saveAndRestart;
+
+  // Upload config from PC & Restart with 3-second status popup
+  let statusPopupTimer = null;
+  const showUploadStatusPopup = (title, msg, tone = 'info', autoHideMs = 0) => {
+    let pop = $('#cfg-upload-popup');
+    if (!pop) {
+      pop = el(`<div id="cfg-upload-popup" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:220;min-width:300px;max-width:440px;background:#0F172A;border:1.5px solid #38BDF8;border-radius:14px;padding:16px 20px;box-shadow:0 18px 50px rgba(0,0,0,.65);text-align:center">
+        <div id="cfg-up-title" style="font-size:15px;font-weight:900;margin-bottom:6px;color:#38BDF8"></div>
+        <div id="cfg-up-msg" style="font-size:13px;color:#CBD5E1;line-height:1.45"></div>
+      </div>`);
+      document.body.appendChild(pop);
+    }
+    const col = tone === 'ok' ? '#34D399' : tone === 'bad' ? '#EF4444' : '#38BDF8';
+    pop.style.borderColor = col;
+    pop.querySelector('#cfg-up-title').style.color = col;
+    pop.querySelector('#cfg-up-title').textContent = title;
+    pop.querySelector('#cfg-up-msg').textContent = msg;
+    pop.style.display = 'block';
+    clearTimeout(statusPopupTimer);
+    if (autoHideMs > 0) {
+      statusPopupTimer = setTimeout(() => {
+        if (pop) pop.style.display = 'none';
+      }, autoHideMs);
+    }
+  };
+
+  const uploadInput = $('#cfg-upload-input', root);
+  const uploadBtn = $('#cfg-upload-restart', root);
+  if (uploadBtn && uploadInput) {
+    uploadBtn.onclick = () => {
+      uploadInput.value = '';
+      uploadInput.click();
+    };
+    uploadInput.onchange = async () => {
+      const file = uploadInput.files && uploadInput.files[0];
+      if (!file) return;
+      let text = '';
+      try {
+        text = await file.text();
+      } catch (e) {
+        showUploadStatusPopup('⚠ Read Failed', 'Could not read selected file: ' + (e.message || e), 'bad', 3000);
+        return;
+      }
+      if (!text.trim()) {
+        showUploadStatusPopup('⚠ Empty File', `Refusing to upload empty file (${file.name}).`, 'bad', 3000);
+        return;
+      }
+      confirmBox(
+        'Upload & Restart Klipper',
+        `Upload <b>${file.name}</b> (${file.size.toLocaleString()} B) from your PC to overwrite <b>${currentFile}</b> and restart Klipper?`,
+        'Upload & Restart',
+        async () => {
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = 'Uploading…';
+          statusPill.className = 'pill warn';
+          statusPill.textContent = '● Uploading…';
+          showUploadStatusPopup('📤 Uploading Config…', `Sending ${file.name} → ${currentFile}…`, 'info', 0);
+          try {
+            const ok = await MR.writeConfig(text, currentFile);
+            if (!ok) throw new Error('Upload failed');
+            loadedOk = true;
+            originalText = text;
+            ta.value = text;
+            updateHighlight();
+            markDirty(false);
+            updateGutter();
+            parseSections();
+            updateCursor();
+            statusPill.className = 'pill warn';
+            statusPill.textContent = '● Restarting…';
+            try {
+              await MR.post('/printer/restart', null, 15000);
+            } catch (re) {
+              await MR.restart();
+            }
+            showUploadStatusPopup('✓ Uploaded & Restarting', `${currentFile} updated from ${file.name}. Klipper is restarting…`, 'ok', 3000);
+            toast(`✓ Uploaded ${currentFile} & restarting Klipper`, 3000);
+            setTimeout(() => {
+              if (App.cur === 'config') loadConfig({ silent: true });
+            }, 3200);
+          } catch (e) {
+            statusPill.className = 'pill bad';
+            statusPill.textContent = '● Upload failed';
+            showUploadStatusPopup('⚠ Upload Failed', e.message || 'Could not upload config file.', 'bad', 3000);
+            toast('⚠ Upload & Restart failed', 3000);
+          } finally {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = '📤 Upload & Restart';
+          }
+        },
+        false
+      );
+    };
+  }
 
   let loadedOnce = false;
   MR.on('connection', ok => {
