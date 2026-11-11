@@ -2,7 +2,6 @@
 const CAL = {
   // Bed & First Layer
   bed_mesh: { icon: 'mesh', title: 'Bed Mesh Calibrate', cmd: 'BED_MESH_CALIBRATE', desc: 'Multi-point surface mesh scan & 3D plate view.', custom: 'mesh' },
-  z_offset: { icon: 'zoffset', title: 'Z-Offset Adjust', cmd: 'Z_OFFSET_APPLY_PROBE', desc: 'Live nozzle squish & first-layer babystepping.', custom: 'zoff' },
   probe_cal: { icon: 'probe', title: 'Probe Calibrate (Paper Test)', cmd: 'PROBE_CALIBRATE', desc: 'Manual paper drag test for Z probe zero.', custom: 'probe_cal' },
   screws_tilt: { icon: 'screws', title: 'Bed Screws Adjust', cmd: 'BED_SCREWS', desc: 'Bed corner leveling with CW/CCW screw turns.', custom: 'screws' },
   dual_z_trim: { icon: 'gantry', title: 'Manual Dual Z Trim', cmd: 'DUAL_Z_TRIM', desc: 'Dual Z leadscrew alignment & level check.', custom: 'dualz' },
@@ -55,7 +54,6 @@ function openCal(k) {
   if (!i || !i.custom) return;
   const dispatch = {
     mesh: bedMesh,
-    zoff: zOffset,
     probe_cal: probeCal,
     screws: bedScrews,
     dualz: dualZTrim,
@@ -78,7 +76,7 @@ App.pages.calibrate = (() => {
   const sections = [
     {
       title: 'BED LEVELING & PROBE CALIBRATION',
-      keys: ['bed_mesh', 'z_offset', 'probe_cal', 'screws_tilt', 'dual_z_trim', 'probe_acc']
+      keys: ['bed_mesh', 'probe_cal', 'screws_tilt', 'dual_z_trim', 'probe_acc']
     },
     {
       title: 'GANTRY LEVELING & TRAMMING',
@@ -133,7 +131,7 @@ App.pages.settings = (() => {
     return parts.length ? parts.join(' • ') : 'STUDIO & TUNING';
   };
   const draw = () => {
-    const cal = ['bed_mesh', 'z_offset', 'probe_cal', 'screws_tilt', 'dual_z_trim', 'probe_acc', 'pid_tune', 'load_cell_weight_test'].filter(supported);
+    const cal = ['bed_mesh', 'probe_cal', 'screws_tilt', 'dual_z_trim', 'probe_acc', 'pid_tune', 'load_cell_weight_test'].filter(supported);
     root.innerHTML = `${cal.length ? '<div class="hdr">BED & PROBE CALIBRATION SHORTCUTS</div><div class="grid2">' + cal.map(k => cardHTML(k, CAL[k])).join('') + '</div>' : ''}
     <div class="hdr">DISPLAY, ALERTS & BACKUP</div><div class="grid2">
      <div class="cc" id="s-sleep">${ICON('clock')}<div><div class="ti">Screen Sleep Timer</div><div class="ds">Auto-dim / low-power sleep screen after inactivity.</div><span class="cmd" id="s-sleep-badge">TIMEOUT: ${getSleepLabel().toUpperCase()}</span></div><span class="ar">›</span></div>

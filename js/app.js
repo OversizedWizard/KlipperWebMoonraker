@@ -307,7 +307,7 @@ const SUB_ROUTES = {
       }
     }, 60);
   },
-  'sub-zoff': () => zOffset(),
+  'sub-zoff': () => probeCal(),
   'sub-probe-cal': () => probeCal(),
   'sub-load-cell-cal': () => loadCellCal(),
   'sub-ztilt': () => zTiltSub(),

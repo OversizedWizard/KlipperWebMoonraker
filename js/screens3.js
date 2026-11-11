@@ -268,36 +268,6 @@ function bedMesh(){
   };
 }
 
-/* ---- Z offset ---- */
-function zOffset(){
-  const sec=MR.config.load_cell_probe?'load_cell_probe':(MR.config.probe?'probe':'bltouch');
-  const stored=parseFloat(MR.config[sec]?.z_offset)||0;let delta=0,step=.01;const a=Anim.zoffset();
-  const bs=bedSize();
-  const n=el(`<div class="sub-web-grid">
-    <div class="sub-web-left">
-      <div id="za"></div>
-      <div class="box"><div class="h">ACTIVE Z-OFFSET [${sec}]</div><span class="big" id="zs">${stored.toFixed(3)}</span> mm → new <span class="big" id="zn" style="color:#00E5FF"></span> mm</div>
-    </div>
-    <div class="sub-web-right">
-      <div class="box col"><div class="h">PAPER TEST POSITION</div>
-        <button class="btn" id="zmove" style="min-height:38px;font-weight:700;align-self:flex-start;padding:8px 18px">⌖ Move to Bed Center & Home</button>
-      </div>
-      <div class="box col"><div class="h">JOG STEP (mm)</div>
-        <div class="row">${[.01,.025,.05,.1].map(s=>`<button class="btn sm grow ${s===step?'on':''}" data-s="${s}">${s}</button>`).join('')}</div>
-        <div class="row" style="margin-top:6px"><button class="btn grow" id="zdn" style="min-height:42px;font-weight:800">▼ Lower Nozzle (squish)</button><button class="btn grow" id="zup" style="min-height:42px;font-weight:800">▲ Raise Nozzle</button></div>
-      </div>
-      <div class="row" style="margin-top:4px"><button class="btn" id="zrs" style="min-width:80px">Reset Δ</button><button class="btn pri grow" id="zsv" style="min-height:44px;font-weight:800;font-size:14px">💾 Save to printer.cfg</button></div>
-    </div>
-  </div>`);
-  $('#za',n).append(a.el);openSub('Z-Offset Calibration',n);
-  const upd=()=>{$('#zn',n).textContent=(stored+delta).toFixed(3);a.set({delta})};upd();
-  n.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{step=+b.dataset.s;n.querySelectorAll('[data-s]').forEach(x=>x.classList.toggle('on',x===b))});
-  $('#zmove',n).onclick=async()=>{await ensureHomed();await MR.gcode(`G90\nG1 X${bs.x/2} Y${bs.y/2} F6000\nG1 Z5 F600`);toast('At center')};
-  $('#zdn',n).onclick=()=>{delta=+(delta-step).toFixed(4);MR.babystep(-step);upd()};$('#zup',n).onclick=()=>{delta=+(delta+step).toFixed(4);MR.babystep(step);upd()};
-  $('#zrs',n).onclick=()=>{MR.babystep(-delta);delta=0;upd()};
-  $('#zsv',n).onclick=async()=>{await MR.gcode('Z_OFFSET_APPLY_PROBE');await MR.saveConfig();toast('Saved')};
-}
-
 /* ---- Probe accuracy ---- */
 function probeAccuracy(){
   const bs=bedSize();const ch=Anim.chart({h:200,scatter:true,dec:4,minPad:.002,empty:'Samples will plot here in real time'});let N=10;
