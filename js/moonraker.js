@@ -139,8 +139,14 @@ class MoonrakerClient{
   resume(){return this.post('/printer/print/resume')}
   cancel(){return this.post('/printer/print/cancel')}
   startPrint(f){return this.post('/printer/print/start?filename='+encodeURIComponent(f))}
-  getHistory(limit=100){return this.get('/server/history/list?limit='+limit+'&order=desc')}
-  clearHistory(){return this.del('/server/history/job?all=true')}
+  async getHistory(limit=100){
+    if(!this.connected||!this.base)await this.whenConnected(6000).catch(()=>{});
+    return this.get('/server/history/list?limit='+limit+'&order=desc',15000);
+  }
+  async clearHistory(){
+    if(!this.connected||!this.base)await this.whenConnected(6000).catch(()=>{});
+    return this.del('/server/history/job?all=true',15000);
+  }
   saveConfig(){return this.gcode('SAVE_CONFIG',30000)}
   hasLoadCellProbe(){return Boolean(this.config?.load_cell_probe||this.objects.includes('load_cell_probe'))}
   tareGcode(){return this.hasLoadCellProbe()?'G4 P250\nLOAD_CELL_TARE\nG4 P100\n':''}

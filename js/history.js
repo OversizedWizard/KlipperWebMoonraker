@@ -4,6 +4,7 @@
   let jobs = [];
   let filter = 'all'; // 'all', 'completed', 'failed'
   let loading = false;
+  let errorMsg = '';
 
   function fmtTime(sec){
     if(!sec || sec <= 0) return '0s';
@@ -57,13 +58,21 @@
 
   async function loadHistory(){
     loading = true;
+    errorMsg = '';
     render();
     try {
       const res = await MR.getHistory(100);
-      jobs = (res && res.jobs) ? res.jobs : [];
+      if (Array.isArray(res)) {
+        jobs = res;
+      } else if (res && Array.isArray(res.jobs)) {
+        jobs = res.jobs;
+      } else {
+        jobs = [];
+      }
     } catch(e){
       console.error('Failed to load history', e);
-      toast('Failed to load history');
+      errorMsg = (e && e.message) ? String(e.message) : 'Network or Moonraker error';
+      toast('Failed to load history: ' + errorMsg);
     } finally {
       loading = false;
       render();
@@ -188,6 +197,7 @@
         <!-- Top Toolbar -->
         <div class="row" style="align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
           <div class="row" style="align-items:center;gap:12px">
+            <button class="btn sm" id="h-back-files" style="font-weight:800">‹ Back to Files</button>
             <div style="font-size:18px;font-weight:900;letter-spacing:1px;color:#f8fafc">PRINT HISTORY</div>
             <div style="display:flex;gap:6px">
               <span class="badge" style="background:rgba(0,229,255,0.12);color:#00E5FF;border:1px solid rgba(0,229,255,0.3);font-size:11px;font-weight:800;padding:3px 8px;border-radius:12px">TOTAL: ${totalCount}</span>
@@ -222,7 +232,14 @@
         <!-- Jobs List -->
         <div id="h-list" style="display:flex;flex-direction:column;gap:10px">
           ${loading ? '<div style="text-align:center;padding:40px;color:#94a3b8;font-weight:700">Loading print history...</div>' : ''}
-          ${(!loading && filtered.length === 0) ? `
+          ${(!loading && errorMsg) ? `
+            <div style="text-align:center;padding:36px 20px;background:rgba(239,68,68,0.1);border-radius:12px;border:1px solid rgba(239,68,68,0.35)">
+              <div style="font-size:16px;font-weight:800;color:#FCA5A5">Failed to load print history</div>
+              <div style="font-size:12px;color:#94a3b8;margin-top:4px">${errorMsg}</div>
+              <button class="btn sm pri" id="h-retry" style="margin-top:12px">⟳ Retry</button>
+            </div>
+          ` : ''}
+          ${(!loading && !errorMsg && filtered.length === 0) ? `
             <div style="text-align:center;padding:60px 20px;background:#0d1527;border-radius:12px;border:1px dashed rgba(255,255,255,0.1)">
               <div style="font-size:36px;margin-bottom:10px">📜</div>
               <div style="font-size:16px;font-weight:800;color:#f8fafc">No print history found</div>
@@ -317,7 +334,13 @@
       };
     });
 
-    // Bind refresh & clear all
+    // Bind back, retry, refresh & clear all
+    const backBtn = $('#h-back-files', root);
+    if(backBtn) backBtn.onclick = () => (App.go ? App.go('files') : go('files'));
+
+    const retryBtn = $('#h-retry', root);
+    if(retryBtn) retryBtn.onclick = () => loadHistory();
+
     const refBtn = $('#h-refresh', root);
     if(refBtn) refBtn.onclick = () => loadHistory();
 
@@ -331,3 +354,4 @@
     }
   };
 })();
+

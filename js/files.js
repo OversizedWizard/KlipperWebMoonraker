@@ -26,6 +26,7 @@ App.pages.files=(()=>{
         <button class="btn sm" id="f-view-toggle" title="Toggle Grid / List View">
           ${viewMode==='grid'?ICON('list',16)+' List':ICON('grid',16)+' Grid'}
         </button>
+        <button class="btn sm" id="f-history-btn" title="View Print History" style="border-color:rgba(0,229,255,.45);color:#7DD3FC;font-weight:800">${ICON('history',16)} History</button>
         <button class="btn sm" id="f-timelapse-btn" title="View & Download Timelapses" style="border-color:rgba(192,132,252,.4);color:#E9D5FF">🎬 Timelapses</button>
         <button class="btn sm" id="f-mkdir-btn" title="Create New Folder">${ICON('folderadd',16)} New Folder</button>
         <button class="btn sm" id="f-refresh-btn" title="Refresh files">${ICON('reload',16)||'⟳'}</button>
@@ -980,6 +981,7 @@ App.pages.files=(()=>{
     filterAndRender();
   };
 
+  $('#f-history-btn').onclick=()=>go('history');
   $('#f-timelapse-btn').onclick=openTimelapsesModal;
   $('#f-mkdir-btn').onclick=promptNewFolder;
   $('#f-refresh-btn').onclick=load;

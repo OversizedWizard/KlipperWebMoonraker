@@ -3,7 +3,7 @@ const $=(s,r=document)=>r.querySelector(s);
 const el=(html)=>{const t=document.createElement('div');t.innerHTML=html.trim();return t.firstElementChild};
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(()=>t.style.display='none',2600)}
 const App={pages:{},cur:'',history:[],subStack:null,homedAxes:'',mr:MR}; window.App=App;
-const NAV_TOP=[['home','Home'],['files','Files'],['printing','Print'],['history','History'],['spool','Spool'],['calibrate','Calibrate']];
+const NAV_TOP=[['home','Home'],['files','Files'],['printing','Print'],['spool','Spool'],['calibrate','Calibrate']];
 const NAV_BOTTOM=[['config','Printer.cfg'],['logs','Logs'],['settings','Settings'],['power','Power']];
 const NAV=[...NAV_TOP,...NAV_BOTTOM];
 const TITLES={home:'Home',files:'Files',printing:'Printing',history:'Print History',spool:'Spool',calibrate:'Calibrate',config:'Printer.cfg',logs:'System Logs',settings:'Settings',power:'Power'};
@@ -31,8 +31,9 @@ function go(page,isBack=false){
     if(App.history.length>50)App.history.shift();
   }
   App.cur=page;
+  const sideKey=page==='history'?'files':page;
   document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='p-'+page));
-  document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.p===page));
+  document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.p===sideKey));
   $('#title').textContent=TITLES[page]||'Home';
   if(window.location.hash.slice(1)!==page){
     try{history.replaceState(null,'','#'+page)}catch(e){window.location.hash=page}
@@ -65,6 +66,7 @@ function closeSub(isBack=false){
   $('#title').textContent=TITLES[App.cur]||'Home';
   updateTopBack();
 }
+App.go=go;
 App.back=function(){
   const o=$('#overlay');
   if(o&&o.classList.contains('show')){
