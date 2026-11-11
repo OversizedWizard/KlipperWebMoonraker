@@ -249,7 +249,7 @@ App.pages.config = (() => {
     tag.addEventListener('click', () => {
       const target = tag.dataset.sec;
       const lines = ta.value.split('\n');
-      const idx = lines.findIndex(l => new RegExp(`^\s*\\[${target}\\b`, 'i').test(l));
+      const idx = lines.findIndex(l => new RegExp(`^\\s*\\[${target}\\b`, 'i').test(l));
       if (idx !== -1) {
         jumpToLine(idx);
       } else {
@@ -450,9 +450,12 @@ App.pages.config = (() => {
   };
 
   // Load config from Moonraker
-  const loadConfig = async () => {
-    statusPill.className = 'pill';
-    statusPill.textContent = 'Loading…';
+  const loadConfig = async (opts = {}) => {
+    const silent = !!opts.silent;
+    if (!silent) {
+      statusPill.className = 'pill';
+      statusPill.textContent = 'Loading…';
+    }
     try {
       loadConfigList();
       const text = await MR.readConfig(currentFile);
@@ -463,11 +466,11 @@ App.pages.config = (() => {
       updateGutter();
       parseSections();
       updateCursor();
-      toast(`${currentFile} loaded`);
+      if (!silent) toast(`${currentFile} loaded`);
     } catch (e) {
       statusPill.className = 'pill bad';
       statusPill.textContent = 'Load Failed';
-      toast(`Failed to load ${currentFile} from printer`);
+      if (!silent) toast(`Failed to load ${currentFile} from printer`);
     }
   };
 
@@ -486,14 +489,18 @@ App.pages.config = (() => {
         originalText = text;
         markDirty(false);
         parseSections();
-        toast(`✓ ${currentFile} saved to printer`);
+        toast(currentFile.endsWith('.cfg')
+          ? `✓ ${currentFile} saved (click Save & Restart to apply in Klipper)`
+          : `✓ ${currentFile} saved to printer`);
       } else {
         toast('⚠ Upload failed');
-        markDirty(true);
+        statusPill.className = 'pill bad';
+        statusPill.textContent = '● Save failed';
       }
     } catch (e) {
       toast(`⚠ Failed to save ${currentFile}: ` + e.message);
-      markDirty(true);
+      statusPill.className = 'pill bad';
+      statusPill.textContent = '● Save failed';
     } finally {
       btn.disabled = false;
       btn.textContent = '💾 Save';
@@ -519,16 +526,25 @@ App.pages.config = (() => {
           if (ok) {
             originalText = text;
             markDirty(false);
+            parseSections();
             toast(`✓ Saved ${currentFile}! Restarting Klipper…`);
-            await MR.restart();
+            try {
+              await MR.post('/printer/restart', null, 15000);
+            } catch (re) {
+              await MR.restart();
+            }
             setTimeout(() => {
               go('home');
             }, 1200);
           } else {
             toast('⚠ Upload failed before restart');
+            statusPill.className = 'pill bad';
+            statusPill.textContent = '● Save failed';
           }
         } catch (e) {
           toast('⚠ Error: ' + e.message);
+          statusPill.className = 'pill bad';
+          statusPill.textContent = '● Save failed';
         } finally {
           btn.disabled = false;
           btn.textContent = '⚡ Save & Restart';
@@ -571,6 +587,8 @@ App.pages.config = (() => {
       if (!loadedOnce || !ta.value || ta.value === 'Loading printer.cfg…') {
         loadedOnce = true;
         loadConfig();
+      } else if (!isDirty) {
+        loadConfig({ silent: true });
       }
     },
     reload: loadConfig

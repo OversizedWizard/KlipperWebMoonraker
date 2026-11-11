@@ -18,7 +18,8 @@ class MoonrakerClient{
     const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),timeout);
     const host=(base||this.base||'http://192.168.0.99:7125').replace(/\/+$/,'');
     try{const r=await fetch(host+path,{...opt,signal:ctl.signal});
-      if(!r.ok)throw new Error(r.status);return r}finally{clearTimeout(t)}
+      if(!r.ok){let msg=String(r.status);try{const txt=await r.text();try{const j=JSON.parse(txt);if(j?.error?.message)msg=j.error.message;else if(txt)msg=`${r.status}: ${txt.slice(0,140)}`}catch(e){if(txt)msg=`${r.status}: ${txt.slice(0,140)}`}}catch(e){}throw new Error(msg)}
+      return r}finally{clearTimeout(t)}
   }
   async get(path,timeout){const r=await this._fetch(path,{},timeout);return (await r.json()).result}
   async post(path,body,timeout){
@@ -236,11 +237,12 @@ class MoonrakerClient{
   async readConfig(filename='printer.cfg'){
     if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
     const clean=String(filename||'printer.cfg').replace(/^\/+/,'');
-    const r=await this._fetch('/server/files/config/'+clean.split('/').map(encodeURIComponent).join('/'));return r.text()}
+    const r=await this._fetch('/server/files/config/'+clean.split('/').map(encodeURIComponent).join('/')+'?_='+Date.now(),{cache:'no-store'});return r.text()}
   async listConfigs(){
     if(!this.connected||!this.base)await this.whenConnected().catch(()=>{});
     try{
-      const res=await this.get('/server/files/list?root=config',8000);
+      const r=await this._fetch('/server/files/list?root=config&_='+Date.now(),{cache:'no-store'},8000);
+      const res=(await r.json()).result;
       if(Array.isArray(res))return res.filter(f=>!String(f.path||'').startsWith('.')&&!String(f.path||'').includes('/.'));
     }catch(e){}
     return [{path:'printer.cfg',size:0,modified:0}];
@@ -278,7 +280,7 @@ class MoonrakerClient{
     fd.append('file',new Blob([text],{type:'text/plain'}),baseName);
     fd.append('root','config');
     if(subDir)fd.append('path',subDir);
-    await this._fetch('/server/files/upload',{method:'POST',body:fd},15000);return true}
+    await this._fetch('/server/files/upload',{method:'POST',body:fd,cache:'no-store'},15000);return true}
   excludeObject(name){
     if(!name)return Promise.resolve(false);
     return this.gcode(`EXCLUDE_OBJECT NAME=${name}`);

@@ -406,7 +406,7 @@ input[type=range]{accent-color:var(--cyan);cursor:pointer}
 /* ---- Printer.cfg Editor ---- */
 #p-config{display:none;height:100%;flex-direction:column;gap:8px;overflow:hidden}
 #p-config.active{display:flex}
-.cfg-bar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;padding:6px 10px;overflow-x:auto}
+.cfg-bar{display:flex;align-items:center;gap:6px 8px;flex-wrap:wrap;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;padding:6px 10px}
 .cfg-badge{display:inline-flex;align-items:center;gap:6px;font-family:Consolas,monospace;font-size:13px;font-weight:800;color:#E2E8F0;flex:none}
 .cfg-badge svg{width:18px;height:18px;color:var(--cyan)}
 .cfg-sel{background:#1E293B;border:1px solid #475569;border-radius:8px;color:#F8FAFC;font-size:12px;font-weight:700;padding:6px 10px;max-width:170px;flex:none}
