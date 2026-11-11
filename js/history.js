@@ -199,10 +199,10 @@
           <div class="row" style="align-items:center;gap:12px">
             <button class="btn sm" id="h-back-files" style="font-weight:800">‹ Back to Files</button>
             <div style="font-size:18px;font-weight:900;letter-spacing:1px;color:#f8fafc">PRINT HISTORY</div>
-            <div style="display:flex;gap:6px">
-              <span class="badge" style="background:rgba(0,229,255,0.12);color:#00E5FF;border:1px solid rgba(0,229,255,0.3);font-size:11px;font-weight:800;padding:3px 8px;border-radius:12px">TOTAL: ${totalCount}</span>
-              <span class="badge" style="background:rgba(16,185,129,0.15);color:#34D399;border:1px solid rgba(16,185,129,0.35);font-size:11px;font-weight:800;padding:3px 8px;border-radius:12px">✔ SUCCESS: ${completedCount}</span>
-              <span class="badge" style="background:rgba(239,68,68,0.15);color:#F87171;border:1px solid rgba(239,68,68,0.35);font-size:11px;font-weight:800;padding:3px 8px;border-radius:12px">✖ FAILED: ${failedCount}</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <span style="background:rgba(0,229,255,0.12);color:#00E5FF;border:1px solid rgba(0,229,255,0.3);font-size:11px;font-weight:800;padding:3px 10px;border-radius:12px">TOTAL: ${totalCount}</span>
+              <span style="background:rgba(16,185,129,0.15);color:#34D399;border:1px solid rgba(16,185,129,0.35);font-size:11px;font-weight:800;padding:3px 10px;border-radius:12px">✔ SUCCESS: ${completedCount}</span>
+              <span style="background:rgba(239,68,68,0.15);color:#F87171;border:1px solid rgba(239,68,68,0.35);font-size:11px;font-weight:800;padding:3px 10px;border-radius:12px">✖ FAILED: ${failedCount}</span>
             </div>
           </div>
 
