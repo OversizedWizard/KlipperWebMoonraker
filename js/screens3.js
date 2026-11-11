@@ -337,11 +337,14 @@ function probeAccuracy(){
 
 /* ---- Load cell weight test with live needle gauge ---- */
 function loadCellTest(){
+  const lcCfg=MR.config.load_cell_probe||MR.config.load_cell||{};
+  const sps=parseInt(lcCfg.sample_rate)||660;
+  const sType=(lcCfg.sensor_type||'ads1220').toUpperCase();
   const ga=Anim.gauge({h:220,label:'TOOLHEAD PROBE FORCE (g)'});
   const n=el(`<div class="sub-web-grid">
     <div class="sub-web-left">
       <div id="lca"></div>
-      <div class="box" style="text-align:center;font-weight:700" id="lc-status">Sensor Active • 80 Samples/sec</div>
+      <div class="box" style="text-align:center;font-weight:700" id="lc-status">Sensor Active • ${sps} Samples/sec</div>
     </div>
     <div class="sub-web-right">
       <div class="box col">
@@ -357,16 +360,20 @@ function loadCellTest(){
           <button class="btn sm" id="lt" style="padding:7px 18px;font-weight:700">⌖ Tare Zero</button>
         </div>
       </div>
-      <div class="sub mono" id="lm" style="font-size:11px;text-align:center">HX711 24-bit ADC on Toolhead CANBus</div>
+      <div class="sub mono" id="lm" style="font-size:11px;text-align:center">${sType} 24-bit ADC on Toolhead CANBus • ${sps} SPS</div>
     </div>
   </div>`);
   $('#lca',n).append(ga.el);openSub('Load Cell Weight Test',n);
   const f=s=>{
     if(!n.isConnected)return;
     const lc=s.load_cell_probe||s.load_cell||{};
-    if(lc.force_g!==undefined){
+    if(lc.is_calibrated===false&&lc.force_g===undefined){
+      $('#lc-status',n).innerHTML='<span style="color:#F59E0B">○ Uncalibrated — run Load Cell Calibration first</span>';
+      return;
+    }
+    if(lc.force_g!==undefined&&lc.force_g!==null){
       const g=lc.force_g;ga.set({val:g});
-      const trig=parseFloat((MR.config.load_cell_probe||{}).trigger_force)||25;
+      const trig=parseFloat((MR.config.load_cell_probe||{}).trigger_force)||60;
       $('#lc-status',n).innerHTML=Math.abs(g)>=trig
         ?'<span style="color:#EF4444">● TRIGGER THRESHOLD REACHED</span>'
         :'<span style="color:#34D399">○ Normal Load Range</span>';
@@ -377,8 +384,10 @@ function loadCellTest(){
   $('#lread',n).onclick=async()=>{
     const btn=$('#lread',n);btn.disabled=true;btn.textContent='Reading…';
     const cap=gcodeCapture();await MR.gcode('LOAD_CELL_READ');await new Promise(r=>setTimeout(r,600));cap.stop();
-    const m=cap.lines.join('\n').match(/(-?[\d.]+)\s*g/);
-    $('#lr',n).textContent=m?m[1]+' g':((stat().load_cell_probe?.force_g??0).toFixed(1)+' g');
+    const raw=cap.lines.join('\n');
+    const m=raw.match(/(-?[\d.]+)\s*g/);
+    const pct=raw.match(/\(([\d.]+%)\)/);
+    $('#lr',n).textContent=m?m[1]+' g':(pct?pct[1]+' (uncal)':((stat().load_cell_probe?.force_g??0).toFixed(1)+' g'));
     btn.disabled=false;btn.textContent='⚖ Read Attached Weight';
   };
 }
@@ -546,17 +555,18 @@ function probeCal() {
 /* ---- Load cell calibration wizard ---- */
 function loadCellCal() {
   const ga = Anim.gauge({ h: 220, label: 'LOAD CELL FORCE (g)' });
-  let knownWeight = 100;
+  let knownWeight = 500;
+  let calActive = false;
 
   const n = el(`<div class="sub-web-grid">
     <div class="sub-web-left">
       <div id="lca-cal"></div>
       <div class="box" style="font-size:12px;line-height:1.5">
         <b>CALIBRATION WIZARD STEPS:</b><br>
-        1. Ensure nozzle is clean and cold.<br>
-        2. With NO load on nozzle, tap <b>Tare Zero Baseline</b>.<br>
-        3. Place a known weight (e.g. 100g) under nozzle probe.<br>
-        4. Select weight below and tap <b>Calibrate Sensitivity Factor</b>.
+        1. Ensure nozzle is clean and untouched.<br>
+        2. Tap <b>Start &amp; Tare Zero Baseline</b> (LOAD_CELL_CALIBRATE + TARE).<br>
+        3. Apply known weight / press scale (&ge;1% change, e.g. 500g).<br>
+        4. Select weight below and tap <b>Calibrate Sensitivity &amp; Save</b>.
       </div>
     </div>
     <div class="sub-web-right">
@@ -573,20 +583,21 @@ function loadCellCal() {
 
       <div class="box col">
         <div class="h">STEP 1: ZERO BASELINE</div>
-        <button class="btn pri" id="lcc-tare" style="min-height:42px;font-weight:800;font-size:14px">⚖ Tare Zero Baseline (No Load)</button>
+        <button class="btn pri" id="lcc-tare" style="min-height:42px;font-weight:800;font-size:14px">⚖ Start &amp; Tare Zero Baseline (No Load)</button>
       </div>
 
       <div class="box col">
         <div class="h">STEP 2: APPLY KNOWN CALIBRATION WEIGHT</div>
         <div class="row">
-          ${[50, 100, 200, 500].map(w => `<button class="btn sm grow ${w === 100 ? 'on' : ''}" data-w="${w}">${w}g</button>`).join('')}
+          ${[100, 200, 500, 1000].map(w => `<button class="btn sm grow ${w === 500 ? 'on' : ''}" data-w="${w}">${w}g</button>`).join('')}
         </div>
-        <div class="row" style="margin-top:8px">
-          <button class="btn green grow" id="lcc-apply" style="min-height:44px;font-weight:800;font-size:14px">✔ Calibrate Sensitivity & Save</button>
+        <div class="row" style="margin-top:8px;gap:8px">
+          <button class="btn" id="lcc-abort" style="min-height:44px;font-weight:700">✕ Abort</button>
+          <button class="btn green grow" id="lcc-apply" style="min-height:44px;font-weight:800;font-size:14px">✔ Calibrate Sensitivity &amp; Save</button>
         </div>
       </div>
 
-      <div class="box mono" id="lcc-log" style="font-size:12px">Ready for zero baseline tare.</div>
+      <div class="box mono" id="lcc-log" style="font-size:12px">Ready for Step 1: ensure nozzle is untouched and tap Start &amp; Tare.</div>
     </div>
   </div>`);
 
@@ -603,38 +614,96 @@ function loadCellCal() {
   const f = s => {
     if (!n.isConnected) return;
     const lc = s.load_cell_probe || s.load_cell || {};
-    if (lc.force_g !== undefined) {
+    if (lc.is_calibrated === false && lc.force_g === undefined) {
+      $('#lcc-live', n).textContent = 'Uncalibrated';
+      $('#lcc-status', n).textContent = calActive ? 'Calibrating…' : 'Needs Calibration';
+      $('#lcc-status', n).style.color = '#F59E0B';
+      return;
+    }
+    if (lc.force_g !== undefined && lc.force_g !== null) {
       const g = lc.force_g;
       ga.set({ val: g });
       $('#lcc-live', n).textContent = (g >= 0 ? '+' : '') + g.toFixed(1) + ' g';
+      $('#lcc-status', n).textContent = calActive ? 'Calibrating…' : 'Calibrated';
+      $('#lcc-status', n).style.color = '#34D399';
     }
   };
   MR.on('status', f);
+  f(stat());
+
+  const lastGcodeErr = lines => {
+    const rev = [...lines].reverse();
+    const hit = rev.find(l => /^!!|error|unknown|must|least|range/i.test(l));
+    return hit ? hit.replace(/^!!\s*/, '') : null;
+  };
 
   $('#lcc-tare', n).onclick = async () => {
-    $('#lcc-tare', n).disabled = true;
-    $('#lcc-log', n).textContent = 'Taring load cell baseline…';
-    await MR.tare();
-    ga.set({ val: 0 });
-    $('#lcc-tare', n).disabled = false;
-    $('#lcc-log', n).textContent = '✓ Zero baseline captured. Now attach known weight to nozzle.';
-    toast('✓ Zero baseline tared');
+    const btn = $('#lcc-tare', n);
+    btn.disabled = true;
+    $('#lcc-log', n).textContent = 'Starting LOAD_CELL_CALIBRATE and capturing empty TARE…';
+    const cap = gcodeCapture();
+    let started = await MR.gcode('LOAD_CELL_CALIBRATE');
+    if (!started) {
+      await MR.gcode('ABORT');
+      started = await MR.gcode('LOAD_CELL_CALIBRATE');
+    }
+    if (!started) {
+      await new Promise(r => setTimeout(r, 250));
+      cap.stop();
+      $('#lcc-log', n).textContent = '⚠ ' + (lastGcodeErr(cap.lines) || 'Could not start LOAD_CELL_CALIBRATE.');
+      btn.disabled = false;
+      return;
+    }
+    calActive = true;
+    const tared = await MR.gcode('TARE', 20000);
+    await new Promise(r => setTimeout(r, 300));
+    cap.stop();
+    btn.disabled = false;
+    if (tared) {
+      ga.set({ val: 0 });
+      const tareLine = [...cap.lines].reverse().find(l => /tare value/i.test(l));
+      $('#lcc-log', n).textContent = `✓ ${tareLine || 'Zero baseline tared'}. Now apply >=${knownWeight}g (>=1% change) and tap Calibrate.`;
+      toast('✓ Zero baseline tared');
+    } else {
+      $('#lcc-log', n).textContent = '⚠ ' + (lastGcodeErr(cap.lines) || 'TARE failed. Check Klipper console.');
+    }
+  };
+
+  $('#lcc-abort', n).onclick = async () => {
+    await MR.gcode('ABORT');
+    calActive = false;
+    $('#lcc-log', n).textContent = 'Calibration aborted. Tap Step 1 to start over.';
+    toast('Calibration aborted');
   };
 
   $('#lcc-apply', n).onclick = async () => {
     const b = $('#lcc-apply', n);
     b.disabled = true;
-    $('#lcc-log', n).textContent = `Running LOAD_CELL_CALIBRATE WEIGHT=${knownWeight}…`;
-    const ok = await MR.gcode(`LOAD_CELL_CALIBRATE WEIGHT=${knownWeight}`);
-    if (ok) {
-      await MR.saveConfig();
-      toast('✓ Load cell calibrated and saved!');
-      $('#lcc-log', n).textContent = '✓ Calibration complete! Klipper restarting to apply sensitivity.';
-      setTimeout(closeSub, 1500);
-    } else {
-      $('#lcc-log', n).textContent = '⚠ Calibration command returned error. Check Klipper console.';
+    $('#lcc-log', n).textContent = `Running CALIBRATE GRAMS=${knownWeight}…`;
+    const cap = gcodeCapture();
+    const okCal = await MR.gcode(`CALIBRATE GRAMS=${knownWeight}`, 20000);
+    await new Promise(r => setTimeout(r, 350));
+    if (!okCal) {
+      cap.stop();
+      $('#lcc-log', n).textContent = '⚠ ' + (lastGcodeErr(cap.lines) || 'CALIBRATE failed (press firmer for >=1% change and retry).');
       b.disabled = false;
+      return;
     }
+    const calLine = [...cap.lines].reverse().find(l => /Counts\/gram/i.test(l));
+    $('#lcc-log', n).textContent = `${calLine || 'Multiplier computed'}. Running ACCEPT & SAVE_CONFIG…`;
+    const okAcc = await MR.gcode('ACCEPT', 15000);
+    await new Promise(r => setTimeout(r, 250));
+    cap.stop();
+    if (!okAcc) {
+      $('#lcc-log', n).textContent = '⚠ ' + (lastGcodeErr(cap.lines) || 'ACCEPT failed. Check Klipper console.');
+      b.disabled = false;
+      return;
+    }
+    calActive = false;
+    await MR.saveConfig();
+    toast('✓ Load cell calibrated and saved!');
+    $('#lcc-log', n).textContent = '✓ Calibration complete! Klipper restarting to apply sensitivity.';
+    setTimeout(closeSub, 1500);
   };
 }
 
