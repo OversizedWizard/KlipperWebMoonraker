@@ -659,13 +659,14 @@ function loadCellCal() {
     await new Promise(r => setTimeout(r, 300));
     cap.stop();
     btn.disabled = false;
-    if (tared) {
+    const tareErr = lastGcodeErr(cap.lines);
+    if (tared && !tareErr) {
       ga.set({ val: 0 });
       const tareLine = [...cap.lines].reverse().find(l => /tare value/i.test(l));
       $('#lcc-log', n).textContent = `✓ ${tareLine || 'Zero baseline tared'}. Now apply >=${knownWeight}g (>=1% change) and tap Calibrate.`;
       toast('✓ Zero baseline tared');
     } else {
-      $('#lcc-log', n).textContent = '⚠ ' + (lastGcodeErr(cap.lines) || 'TARE failed. Check Klipper console.');
+      $('#lcc-log', n).textContent = '⚠ ' + (tareErr || 'TARE failed. Check Klipper console.');
     }
   };
 
@@ -683,9 +684,10 @@ function loadCellCal() {
     const cap = gcodeCapture();
     const okCal = await MR.gcode(`CALIBRATE GRAMS=${knownWeight}`, 20000);
     await new Promise(r => setTimeout(r, 350));
-    if (!okCal) {
+    const calErr = lastGcodeErr(cap.lines);
+    if (!okCal || calErr) {
       cap.stop();
-      $('#lcc-log', n).textContent = '⚠ ' + (lastGcodeErr(cap.lines) || 'CALIBRATE failed (press firmer for >=1% change and retry).');
+      $('#lcc-log', n).textContent = '⚠ ' + (calErr || 'CALIBRATE failed (press firmer for >=1% change and retry).');
       b.disabled = false;
       return;
     }
@@ -694,8 +696,9 @@ function loadCellCal() {
     const okAcc = await MR.gcode('ACCEPT', 15000);
     await new Promise(r => setTimeout(r, 250));
     cap.stop();
-    if (!okAcc) {
-      $('#lcc-log', n).textContent = '⚠ ' + (lastGcodeErr(cap.lines) || 'ACCEPT failed. Check Klipper console.');
+    const accErr = lastGcodeErr(cap.lines);
+    if (!okAcc || accErr) {
+      $('#lcc-log', n).textContent = '⚠ ' + (accErr || 'ACCEPT failed. Check Klipper console.');
       b.disabled = false;
       return;
     }
