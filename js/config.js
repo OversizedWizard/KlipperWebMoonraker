@@ -450,15 +450,18 @@ App.pages.config = (() => {
   };
 
   // Load config from Moonraker
+  let loadedOk = false;
   const loadConfig = async (opts = {}) => {
     const silent = !!opts.silent;
     if (!silent) {
       statusPill.className = 'pill';
       statusPill.textContent = 'Loading…';
+      ta.placeholder = `Loading ${currentFile}…`;
     }
     try {
       loadConfigList();
       const text = await MR.readConfig(currentFile);
+      loadedOk = true;
       originalText = text;
       ta.value = text;
       updateHighlight();
@@ -466,8 +469,18 @@ App.pages.config = (() => {
       updateGutter();
       parseSections();
       updateCursor();
-      if (!silent) toast(`${currentFile} loaded`);
+      if (!text.length) {
+        ta.placeholder = `${currentFile} is empty (0 bytes)`;
+        statusPill.className = 'pill warn';
+        statusPill.textContent = '● Empty File (0 B)';
+        if (!silent) toast(`⚠ ${currentFile} is 0 bytes on printer`);
+      } else {
+        ta.placeholder = '';
+        if (!silent) toast(`${currentFile} loaded`);
+      }
     } catch (e) {
+      loadedOk = false;
+      ta.placeholder = `Failed to load ${currentFile}`;
       statusPill.className = 'pill bad';
       statusPill.textContent = 'Load Failed';
       if (!silent) toast(`Failed to load ${currentFile} from printer`);
@@ -477,6 +490,14 @@ App.pages.config = (() => {
   // Save only
   const saveOnly = async () => {
     const text = ta.value;
+    if (!loadedOk && !text.trim()) {
+      toast(`⚠ Load ${currentFile} before saving`);
+      return;
+    }
+    if (!text.trim()) {
+      toast(`⚠ Refusing to overwrite ${currentFile} with empty content`);
+      return;
+    }
     const btn = $('#cfg-save', root);
     btn.disabled = true;
     btn.textContent = 'Saving…';
@@ -509,6 +530,11 @@ App.pages.config = (() => {
 
   // Save and restart
   const saveAndRestart = () => {
+    const currentText = ta.value;
+    if ((!loadedOk && !currentText.trim()) || !currentText.trim()) {
+      toast(`⚠ Refusing to save empty ${currentFile}`);
+      return;
+    }
     confirmBox(
       'Save & Restart Klipper',
       `This will save <b>${currentFile}</b> and immediately execute a Klipper <b>RESTART</b>. Motors and active jobs will stop. Proceed?`,
