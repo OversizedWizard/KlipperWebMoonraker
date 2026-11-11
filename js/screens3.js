@@ -552,71 +552,199 @@ function probeCal() {
   };
 }
 
-/* ---- Load cell calibration wizard ---- */
+/* ---- Load cell calibration wizard (matches Pi 3-step + Z=100 + trigger force UI) ---- */
 function loadCellCal() {
   const ga = Anim.gauge({ h: 220, label: 'LOAD CELL FORCE (g)' });
+  const lcCfg = MR.config.load_cell_probe || MR.config.load_cell || {};
+  let storedForce = Math.round(parseFloat(lcCfg.trigger_force) || 60);
+  let targetForce = storedForce;
   let knownWeight = 500;
   let calActive = false;
+  let step = 1;
+  let virtualZ = 100.0;
+  let jogZCum = 0.0;
+  let cpgVal = 0;
+  let tareVal = 0;
 
   const n = el(`<div class="sub-web-grid">
     <div class="sub-web-left">
       <div id="lca-cal"></div>
-      <div class="box" style="font-size:12px;line-height:1.5">
-        <b>CALIBRATION WIZARD STEPS:</b><br>
-        1. Ensure nozzle is clean and untouched.<br>
-        2. Tap <b>Start &amp; Tare Zero Baseline</b> (LOAD_CELL_CALIBRATE + TARE).<br>
-        3. Apply known weight / press scale (&ge;1% change, e.g. 500g).<br>
-        4. Select weight below and tap <b>Calibrate Sensitivity &amp; Save</b>.
-      </div>
-    </div>
-    <div class="sub-web-right">
       <div class="grid2">
         <div class="box">
           <div class="h">LIVE SENSOR READING</div>
-          <div class="big" id="lcc-live" style="font-size:24px;color:#38BDF8">--.- g</div>
+          <div class="big" id="lcc-live" style="font-size:22px;color:#38BDF8">--.- g</div>
         </div>
         <div class="box">
           <div class="h">STATUS</div>
-          <div class="big" id="lcc-status" style="font-size:18px;color:#34D399">Sensor Ready</div>
+          <div class="big" id="lcc-status" style="font-size:16px;color:#34D399">Initializing…</div>
+        </div>
+      </div>
+      <div class="box mono" id="lcc-meta" style="font-size:11px;color:#94A3B8;text-align:center">Tare: -- • -- counts/g</div>
+      <div class="box mono" id="lcc-log" style="font-size:11.5px;line-height:1.4">Setting Z=100 &amp; starting LOAD_CELL_CALIBRATE…</div>
+    </div>
+
+    <div class="sub-web-right">
+      <div class="row" style="gap:6px">
+        <button class="btn grow on" id="lcc-tab-scale" style="min-height:36px;font-weight:800">⚖ Calibrate Scale (Weight)</button>
+        <button class="btn grow" id="lcc-tab-force" style="min-height:36px;font-weight:700">⚙ Trigger Force (${storedForce}g)</button>
+      </div>
+
+      <div id="lcc-panel-scale" class="col" style="gap:8px">
+        <div class="grid3" style="gap:6px">
+          <div class="box" id="lcc-p1" style="padding:6px;text-align:center;font-size:11px;font-weight:800;background:#0284C7;color:#fff;border-color:#38BDF8">1. Empty Tare</div>
+          <div class="box" id="lcc-p2" style="padding:6px;text-align:center;font-size:11px;font-weight:700;color:#64748B">2. Hang Weight</div>
+          <div class="box" id="lcc-p3" style="padding:6px;text-align:center;font-size:11px;font-weight:700;color:#64748B">3. Accept Scale</div>
+        </div>
+
+        <div class="box col" id="lcc-z-box" style="gap:6px;border-color:rgba(56,189,248,.4)">
+          <div class="row" style="justify-content:space-between;align-items:center;gap:6px">
+            <span class="mono" id="lcc-z-readout" style="font-size:11.5px;font-weight:700;color:#38BDF8">Z: 100.00 mm (rel +0.00) • -Z up / +Z down</span>
+            <button class="btn sm green" id="lcc-z100" style="padding:4px 9px;font-size:11px">Set Z=100</button>
+          </div>
+          <div class="row" style="gap:4px;flex-wrap:wrap">
+            ${[-10, -1, -0.1, -0.05].map(s => `<button class="btn sm danger grow" data-zj="${s}" style="min-height:32px;padding:4px">${s}</button>`).join('')}
+            ${[0.05, 0.1, 1, 10].map(s => `<button class="btn sm ret grow" data-zj="${s}" style="min-height:32px;padding:4px">+${s}</button>`).join('')}
+          </div>
+        </div>
+
+        <!-- Step 1 -->
+        <div id="lcc-step1" class="box col" style="gap:8px">
+          <div class="h" style="color:#34D399">STEP 1: SENSOR EMPTY TARE</div>
+          <div class="sub" style="font-size:12px;line-height:1.4">Ensure cold nozzle is clean with NO weight or scale touching it (use <b>+10</b> above to lower bed if needed). Tap below to capture empty zero.</div>
+          <button class="btn green" id="lcc-tare" style="min-height:44px;font-weight:800;font-size:14px">✓ Sensor Empty — Send TARE</button>
+        </div>
+
+        <!-- Step 2 -->
+        <div id="lcc-step2" class="box col" style="display:none;gap:8px">
+          <div class="h" style="color:#00E5FF">STEP 2: APPLY WEIGHT / JOG ONTO SCALE</div>
+          <div class="sub" style="font-size:12px;line-height:1.35">Hang weight OR jog Z (-up onto bed scale; need &ge;1% change, e.g. 500–1000g). Report reading:</div>
+          <div class="row" style="gap:6px">
+            ${[100, 200, 500, 1000].map(w => `<button class="btn sm grow ${w === 500 ? 'on' : ''}" data-w="${w}">${w}g</button>`).join('')}
+          </div>
+          <div class="row" style="align-items:center;gap:6px">
+            <button class="btn sm danger" data-wg="-10">-10g</button>
+            <button class="btn sm danger" data-wg="-1">-1g</button>
+            <div class="big grow" id="lcc-grams" style="text-align:center;font-size:24px;color:#fff">500 g</div>
+            <button class="btn sm ret" data-wg="1">+1g</button>
+            <button class="btn sm ret" data-wg="10">+10g</button>
+          </div>
+          <div class="row" style="gap:8px">
+            <button class="btn danger" id="lcc-abort2" style="min-height:42px">✕ Abort</button>
+            <button class="btn pri grow" id="lcc-cal" style="min-height:42px;font-weight:800;font-size:14px">▶ Send Scale Reading (CALIBRATE GRAMS=500)</button>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div id="lcc-step3" class="box col" style="display:none;gap:8px">
+          <div class="h" style="color:#34D399">STEP 3: VERIFY &amp; ACCEPT MULTIPLIER</div>
+          <div class="big" id="lcc-s3-cpg" style="font-size:22px;color:#fff">Counts / Gram: -- counts/g</div>
+          <div class="mono sub" id="lcc-s3-tare" style="font-size:12px">Reference Tare: -- counts</div>
+          <div class="sub" style="font-size:11.5px">Klipper has calculated the conversion factor. Send ACCEPT to stage calibration.</div>
+          <div class="row" style="gap:8px">
+            <button class="btn danger" id="lcc-abort3" style="min-height:42px">✕ Abort</button>
+            <button class="btn green grow" id="lcc-accept" style="min-height:42px;font-weight:800;font-size:14px">✓ Accept Multiplier (ACCEPT)</button>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <div id="lcc-results" class="box col" style="display:none;gap:8px;border-color:#34D399">
+          <div class="h" style="color:#34D399">LOAD CELL CALIBRATION COMPLETE</div>
+          <div class="mono" id="lcc-res-cpg" style="font-size:14px;font-weight:800;color:#fff">Counts / Gram: --</div>
+          <div class="mono" id="lcc-res-tare" style="font-size:13px;color:#CBD5E1">Tare Counts: --</div>
+          <div class="mono" id="lcc-res-force" style="font-size:13px;color:#38BDF8">Trigger Force: ${storedForce} g</div>
+          <div class="row" style="gap:8px;margin-top:4px">
+            <button class="btn" id="lcc-close" style="min-height:42px">Close</button>
+            <button class="btn green grow" id="lcc-savecfg" style="min-height:42px;font-weight:800;font-size:14px">💾 Save &amp; Apply Config (SAVE_CONFIG)</button>
+          </div>
         </div>
       </div>
 
-      <div class="box col">
-        <div class="h">STEP 1: ZERO BASELINE</div>
-        <button class="btn pri" id="lcc-tare" style="min-height:42px;font-weight:800;font-size:14px">⚖ Start &amp; Tare Zero Baseline (No Load)</button>
-      </div>
-
-      <div class="box col">
-        <div class="h">STEP 2: APPLY KNOWN CALIBRATION WEIGHT</div>
-        <div class="row">
-          ${[100, 200, 500, 1000].map(w => `<button class="btn sm grow ${w === 500 ? 'on' : ''}" data-w="${w}">${w}g</button>`).join('')}
+      <div id="lcc-panel-force" class="col" style="display:none;gap:8px">
+        <div class="box col" style="gap:8px">
+          <div class="h" id="lcc-f-stored">CONFIG STORED FORCE: ${storedForce} g</div>
+          <div class="row" style="align-items:baseline;gap:10px">
+            <div class="big" id="lcc-f-val" style="font-size:30px;color:#fff">${targetForce} g</div>
+            <div class="sub" id="lcc-f-delta" style="font-size:12px">Stored in printer.cfg</div>
+          </div>
+          <div class="row" style="gap:6px">
+            ${[-10, -5].map(d => `<button class="btn sm danger grow" data-fd="${d}">${d}g</button>`).join('')}
+            ${[5, 10].map(d => `<button class="btn sm ret grow" data-fd="${d}">+${d}g</button>`).join('')}
+          </div>
+          <button class="btn pri" id="lcc-f-save" disabled style="min-height:40px">💾 Save Force to printer.cfg</button>
         </div>
-        <div class="row" style="margin-top:8px;gap:8px">
-          <button class="btn" id="lcc-abort" style="min-height:44px;font-weight:700">✕ Abort</button>
-          <button class="btn green grow" id="lcc-apply" style="min-height:44px;font-weight:800;font-size:14px">✔ Calibrate Sensitivity &amp; Save</button>
+        <div class="box col" style="gap:8px">
+          <div class="h">QUICK SENSOR DIAGNOSTICS</div>
+          <div class="row" style="gap:8px">
+            <button class="btn ret grow" id="lcc-q-tare" style="min-height:38px">⌖ Tare Zero</button>
+            <button class="btn orange grow" id="lcc-q-tap" style="min-height:38px">⚡ Test Tap</button>
+          </div>
         </div>
       </div>
-
-      <div class="box mono" id="lcc-log" style="font-size:12px">Ready for Step 1: ensure nozzle is untouched and tap Start &amp; Tare.</div>
     </div>
   </div>`);
 
   $('#lca-cal', n).append(ga.el);
-  openSub('Load Cell Calibration', n);
 
-  n.querySelectorAll('[data-w]').forEach(b => {
-    b.onclick = () => {
-      knownWeight = parseInt(b.dataset.w);
-      n.querySelectorAll('[data-w]').forEach(x => x.classList.toggle('on', x === b));
-    };
-  });
+  const lastGcodeErr = lines => {
+    const rev = [...lines].reverse();
+    const hit = rev.find(l => /^!!|error|unknown command|must be|at least|out of range/i.test(l));
+    return hit ? hit.replace(/^!!\s*/, '') : null;
+  };
+
+  const setLog = (txt, col = '#CBD5E1') => {
+    const l = $('#lcc-log', n);
+    if (l) { l.textContent = txt; l.style.color = col; }
+  };
+
+  const setStep = s => {
+    step = s;
+    $('#lcc-z-box', n).style.display = (s === 1 || s === 2) ? '' : 'none';
+    $('#lcc-step1', n).style.display = s === 1 ? '' : 'none';
+    $('#lcc-step2', n).style.display = s === 2 ? '' : 'none';
+    $('#lcc-step3', n).style.display = s === 3 ? '' : 'none';
+    $('#lcc-results', n).style.display = s === 4 ? '' : 'none';
+    [[1, '#lcc-p1', '1. Empty Tare'], [2, '#lcc-p2', '2. Hang Weight'], [3, '#lcc-p3', '3. Accept Scale']].forEach(([idx, sel, lbl]) => {
+      const p = $(sel, n);
+      if (idx < s) {
+        p.textContent = '✓ ' + lbl.slice(3);
+        p.style.background = 'rgba(16,185,129,.22)'; p.style.borderColor = '#10B981'; p.style.color = '#34D399';
+      } else if (idx === s) {
+        p.textContent = lbl;
+        p.style.background = '#0284C7'; p.style.borderColor = '#38BDF8'; p.style.color = '#fff';
+      } else {
+        p.textContent = lbl;
+        p.style.background = ''; p.style.borderColor = ''; p.style.color = '#64748B';
+      }
+    });
+  };
+
+  const setKnownGrams = g => {
+    knownWeight = Math.max(50, Math.min(25000, g));
+    $('#lcc-grams', n).textContent = `${knownWeight} g`;
+    $('#lcc-cal', n).textContent = `▶ Send Scale Reading (CALIBRATE GRAMS=${knownWeight})`;
+    n.querySelectorAll('[data-w]').forEach(x => x.classList.toggle('on', parseInt(x.dataset.w) === knownWeight));
+  };
+
+  const updateZLabel = (col = '#38BDF8') => {
+    const zEl = $('#lcc-z-readout', n);
+    if (zEl) {
+      zEl.textContent = `Z: ${virtualZ.toFixed(2)} mm (rel ${jogZCum >= 0 ? '+' : ''}${jogZCum.toFixed(2)}) • -Z up / +Z down`;
+      zEl.style.color = col;
+    }
+  };
 
   const f = s => {
     if (!n.isConnected) return;
     const lc = s.load_cell_probe || s.load_cell || {};
+    if (lc.counts_per_gram) cpgVal = parseFloat(lc.counts_per_gram);
+    const tc = lc.tare_counts ?? lc.reference_tare_counts;
+    if (tc !== undefined && tc !== null) tareVal = parseInt(tc);
+    const cpgTxt = cpgVal > 0 ? `${cpgVal.toFixed(1)} counts/g` : 'uncalibrated';
+    const tareTxt = tareVal ? `${tareVal.toLocaleString()} counts` : 'uncalibrated';
+    $('#lcc-meta', n).textContent = `Tare: ${tareTxt} • ${cpgTxt}`;
     if (lc.is_calibrated === false && lc.force_g === undefined) {
       $('#lcc-live', n).textContent = 'Uncalibrated';
-      $('#lcc-status', n).textContent = calActive ? 'Calibrating…' : 'Needs Calibration';
+      $('#lcc-status', n).textContent = calActive ? `Step ${Math.min(step, 3)}/3 Active` : 'Needs Calibration';
       $('#lcc-status', n).style.color = '#F59E0B';
       return;
     }
@@ -624,89 +752,237 @@ function loadCellCal() {
       const g = lc.force_g;
       ga.set({ val: g });
       $('#lcc-live', n).textContent = (g >= 0 ? '+' : '') + g.toFixed(1) + ' g';
-      $('#lcc-status', n).textContent = calActive ? 'Calibrating…' : 'Calibrated';
+      $('#lcc-status', n).textContent = calActive ? `Step ${Math.min(step, 3)}/3 Active` : 'Calibrated';
       $('#lcc-status', n).style.color = '#34D399';
     }
   };
+
+  openSub('Load Cell Scale & Trigger Calibration', n, () => {
+    MR.off('status', f);
+    if (calActive) { calActive = false; MR.gcode('ABORT'); }
+  });
+
   MR.on('status', f);
   f(stat());
 
-  const lastGcodeErr = lines => {
-    const rev = [...lines].reverse();
-    const hit = rev.find(l => /^!!|error|unknown|must|least|range/i.test(l));
-    return hit ? hit.replace(/^!!\s*/, '') : null;
+  // Initialize virtual Z=100 and start LOAD_CELL_CALIBRATE cleanly (just like Pi)
+  (async () => {
+    await MR.gcode('SET_KINEMATIC_POSITION Z=100');
+    virtualZ = 100.0; jogZCum = 0.0;
+    updateZLabel('#34D399');
+    let ok = await MR.gcode('LOAD_CELL_CALIBRATE');
+    if (!ok) {
+      await MR.gcode('ABORT');
+      ok = await MR.gcode('LOAD_CELL_CALIBRATE');
+    }
+    calActive = ok;
+    if (ok) {
+      setLog('Calibration active (Z=100 set). Clear nozzle, then tap Send TARE.', '#38BDF8');
+    } else {
+      setLog('⚠ Could not start LOAD_CELL_CALIBRATE. Check Klipper status.', '#FCA5A5');
+    }
+  })();
+
+  // Tab switchers
+  $('#lcc-tab-scale', n).onclick = () => {
+    $('#lcc-tab-scale', n).classList.add('on'); $('#lcc-tab-force', n).classList.remove('on');
+    $('#lcc-panel-scale', n).style.display = ''; $('#lcc-panel-force', n).style.display = 'none';
+  };
+  $('#lcc-tab-force', n).onclick = () => {
+    $('#lcc-tab-force', n).classList.add('on'); $('#lcc-tab-scale', n).classList.remove('on');
+    $('#lcc-panel-force', n).style.display = ''; $('#lcc-panel-scale', n).style.display = 'none';
   };
 
+  // Z=100 & Z Jog controls
+  $('#lcc-z100', n).onclick = async () => {
+    const ok = await MR.gcode('SET_KINEMATIC_POSITION Z=100');
+    if (ok) {
+      virtualZ = 100.0; jogZCum = 0.0;
+      updateZLabel('#34D399');
+      setLog('Relative Z set to 100.00 mm. Use +Z to lower bed / -Z to raise onto scale.', '#34D399');
+    } else {
+      setLog('⚠ SET_KINEMATIC_POSITION Z=100 failed (check [force_move]).', '#FCA5A5');
+    }
+  };
+
+  n.querySelectorAll('[data-zj]').forEach(b => {
+    b.onclick = async () => {
+      const dz = parseFloat(b.dataset.zj);
+      const cap = gcodeCapture();
+      const ok = await MR.gcode(`G91\nG1 Z${dz >= 0 ? '+' : ''}${dz.toFixed(2)} F600\nG90`, 15000);
+      await new Promise(r => setTimeout(r, 120));
+      cap.stop();
+      const err = lastGcodeErr(cap.lines);
+      if (ok && !err) {
+        virtualZ += dz; jogZCum += dz;
+        updateZLabel('#38BDF8');
+      } else {
+        setLog('⚠ ' + (err || 'Z move failed — tap Set Z=100 first.'), '#FCA5A5');
+      }
+    };
+  });
+
+  // Weight presets & +/-10, +/-1 buttons
+  n.querySelectorAll('[data-w]').forEach(b => { b.onclick = () => setKnownGrams(parseInt(b.dataset.w)); });
+  n.querySelectorAll('[data-wg]').forEach(b => { b.onclick = () => setKnownGrams(knownWeight + parseInt(b.dataset.wg)); });
+
+  // Step 1: TARE
   $('#lcc-tare', n).onclick = async () => {
     const btn = $('#lcc-tare', n);
-    btn.disabled = true;
-    $('#lcc-log', n).textContent = 'Starting LOAD_CELL_CALIBRATE and capturing empty TARE…';
+    btn.disabled = true; btn.textContent = 'Capturing empty zero (TARE)…';
+    setLog('Capturing empty baseline (TARE)…', '#38BDF8');
     const cap = gcodeCapture();
-    let started = await MR.gcode('LOAD_CELL_CALIBRATE');
-    if (!started) {
-      await MR.gcode('ABORT');
-      started = await MR.gcode('LOAD_CELL_CALIBRATE');
-    }
-    if (!started) {
+    let ok = await MR.gcode('TARE', 20000);
+    await new Promise(r => setTimeout(r, 250));
+    let err = lastGcodeErr(cap.lines);
+    if ((!ok || (err && /unknown command/i.test(err))) && await MR.gcode('LOAD_CELL_CALIBRATE')) {
+      calActive = true;
+      ok = await MR.gcode('TARE', 20000);
       await new Promise(r => setTimeout(r, 250));
-      cap.stop();
-      $('#lcc-log', n).textContent = '⚠ ' + (lastGcodeErr(cap.lines) || 'Could not start LOAD_CELL_CALIBRATE.');
-      btn.disabled = false;
-      return;
+      err = lastGcodeErr(cap.lines);
     }
-    calActive = true;
-    const tared = await MR.gcode('TARE', 20000);
-    await new Promise(r => setTimeout(r, 300));
     cap.stop();
-    btn.disabled = false;
-    const tareErr = lastGcodeErr(cap.lines);
-    if (tared && !tareErr) {
+    btn.disabled = false; btn.textContent = '✓ Sensor Empty — Send TARE';
+    if (ok && !err) {
+      calActive = true;
       ga.set({ val: 0 });
-      const tareLine = [...cap.lines].reverse().find(l => /tare value/i.test(l));
-      $('#lcc-log', n).textContent = `✓ ${tareLine || 'Zero baseline tared'}. Now apply >=${knownWeight}g (>=1% change) and tap Calibrate.`;
+      const raw = cap.lines.join('\n');
+      const mT = raw.match(/Load cell tare value:\s*[-\d.]+%\s*\((-?\d+)\)/i);
+      if (mT) tareVal = parseInt(mT[1]);
+      setLog(`✓ Tare captured (${tareVal ? tareVal.toLocaleString() + ' counts' : 'OK'}). Lower bed (+Z) if needed, apply scale/weight, press nozzle onto scale, and send Step 2.`, '#34D399');
+      setStep(2);
       toast('✓ Zero baseline tared');
     } else {
-      $('#lcc-log', n).textContent = '⚠ ' + (tareErr || 'TARE failed. Check Klipper console.');
+      setLog('⚠ ' + (err || 'TARE failed. Check Klipper status.'), '#FCA5A5');
     }
   };
 
-  $('#lcc-abort', n).onclick = async () => {
+  // Abort helper (Step 2 & Step 3)
+  const doAbort = async () => {
     await MR.gcode('ABORT');
-    calActive = false;
-    $('#lcc-log', n).textContent = 'Calibration aborted. Tap Step 1 to start over.';
-    toast('Calibration aborted');
+    await MR.gcode('LOAD_CELL_CALIBRATE');
+    calActive = true;
+    setStep(1);
+    setLog('Restarted calibration at Step 1. Ensure nozzle is clear, then send TARE.', '#38BDF8');
+    toast('Calibration restarted');
   };
+  $('#lcc-abort2', n).onclick = doAbort;
+  $('#lcc-abort3', n).onclick = doAbort;
 
-  $('#lcc-apply', n).onclick = async () => {
-    const b = $('#lcc-apply', n);
-    b.disabled = true;
-    $('#lcc-log', n).textContent = `Running CALIBRATE GRAMS=${knownWeight}…`;
+  // Step 2: CALIBRATE GRAMS=
+  $('#lcc-cal', n).onclick = async () => {
+    const b = $('#lcc-cal', n);
+    b.disabled = true; b.textContent = `Calibrating ${knownWeight}g…`;
+    setLog(`Running CALIBRATE GRAMS=${knownWeight}…`, '#38BDF8');
     const cap = gcodeCapture();
     const okCal = await MR.gcode(`CALIBRATE GRAMS=${knownWeight}`, 20000);
-    await new Promise(r => setTimeout(r, 350));
-    const calErr = lastGcodeErr(cap.lines);
-    if (!okCal || calErr) {
-      cap.stop();
-      $('#lcc-log', n).textContent = '⚠ ' + (calErr || 'CALIBRATE failed (press firmer for >=1% change and retry).');
-      b.disabled = false;
+    await new Promise(r => setTimeout(r, 300));
+    cap.stop();
+    const err = lastGcodeErr(cap.lines);
+    b.disabled = false; b.textContent = `▶ Send Scale Reading (CALIBRATE GRAMS=${knownWeight})`;
+    if (!okCal || err) {
+      setLog('⚠ ' + (err || 'CALIBRATE failed (need >=1% change, e.g. press >=500g).'), '#FCA5A5');
       return;
     }
-    const calLine = [...cap.lines].reverse().find(l => /Counts\/gram/i.test(l));
-    $('#lcc-log', n).textContent = `${calLine || 'Multiplier computed'}. Running ACCEPT & SAVE_CONFIG…`;
+    const raw = cap.lines.join('\n');
+    const mC = raw.match(/Counts\/gram:\s*([\d.]+)/i);
+    if (mC) cpgVal = parseFloat(mC[1]);
+    $('#lcc-s3-cpg', n).textContent = `Counts / Gram: ${cpgVal > 0 ? cpgVal.toFixed(2) + ' counts/g' : '-- counts/g'}`;
+    $('#lcc-s3-tare', n).textContent = `Reference Tare: ${tareVal ? tareVal.toLocaleString() + ' counts' : '-- counts'}`;
+    setLog(`✓ Multiplier computed: ${cpgVal.toFixed(2)} counts/g. Tap ACCEPT to stage calibration.`, '#34D399');
+    setStep(3);
+  };
+
+  // Step 3: ACCEPT -> Results
+  $('#lcc-accept', n).onclick = async () => {
+    const b = $('#lcc-accept', n);
+    b.disabled = true; b.textContent = 'Accepting multiplier…';
+    const cap = gcodeCapture();
     const okAcc = await MR.gcode('ACCEPT', 15000);
     await new Promise(r => setTimeout(r, 250));
     cap.stop();
-    const accErr = lastGcodeErr(cap.lines);
-    if (!okAcc || accErr) {
-      $('#lcc-log', n).textContent = '⚠ ' + (accErr || 'ACCEPT failed. Check Klipper console.');
-      b.disabled = false;
+    const err = lastGcodeErr(cap.lines);
+    b.disabled = false; b.textContent = '✓ Accept Multiplier (ACCEPT)';
+    if (!okAcc || err) {
+      setLog('⚠ ' + (err || 'ACCEPT failed.'), '#FCA5A5');
       return;
     }
+    const raw = cap.lines.join('\n');
+    const mC = raw.match(/counts_per_gram\s*[:=]\s*([\d.]+)/i);
+    const mT = raw.match(/reference_tare_counts\s*[:=]\s*(-?\d+)/i);
+    if (mC) cpgVal = parseFloat(mC[1]);
+    if (mT) tareVal = parseInt(mT[1]);
     calActive = false;
+    $('#lcc-res-cpg', n).textContent = `Counts / Gram: ${cpgVal > 0 ? cpgVal.toFixed(2) + ' counts/g' : '--'}`;
+    $('#lcc-res-tare', n).textContent = `Tare Counts: ${tareVal ? tareVal.toLocaleString() + ' counts' : '--'}`;
+    $('#lcc-res-force', n).textContent = `Trigger Force: ${targetForce} g`;
+    setLog('✓ Calibration accepted! Click Save & Apply Config (SAVE_CONFIG) to write to printer.cfg.', '#34D399');
+    setStep(4);
+  };
+
+  $('#lcc-close', n).onclick = closeSub;
+  $('#lcc-savecfg', n).onclick = async () => {
+    const b = $('#lcc-savecfg', n);
+    b.disabled = true; b.textContent = 'Saving & Restarting Klipper…';
     await MR.saveConfig();
     toast('✓ Load cell calibrated and saved!');
-    $('#lcc-log', n).textContent = '✓ Calibration complete! Klipper restarting to apply sensitivity.';
-    setTimeout(closeSub, 1500);
+    setTimeout(closeSub, 1400);
+  };
+
+  // Tab 2: Trigger Force Tuning & Quick Diagnostics
+  n.querySelectorAll('[data-fd]').forEach(b => {
+    b.onclick = () => {
+      targetForce = Math.round(Math.max(10, Math.min(350, targetForce + parseInt(b.dataset.fd))) / 5) * 5;
+      $('#lcc-f-val', n).textContent = `${targetForce} g`;
+      const diff = targetForce - storedForce;
+      if (diff === 0) {
+        $('#lcc-f-delta', n).textContent = 'Stored in printer.cfg';
+        $('#lcc-f-delta', n).style.color = '#94A3B8';
+        $('#lcc-f-save', n).disabled = true;
+      } else {
+        $('#lcc-f-delta', n).textContent = `Modified: ${diff > 0 ? '+' : ''}${diff} g (unsaved)`;
+        $('#lcc-f-delta', n).style.color = '#F59E0B';
+        $('#lcc-f-save', n).disabled = false;
+      }
+    };
+  });
+
+  $('#lcc-f-save', n).onclick = async () => {
+    const b = $('#lcc-f-save', n);
+    b.disabled = true; b.textContent = 'Saving to printer.cfg…';
+    try {
+      const cfg = await MR.readConfig('printer.cfg');
+      if (!cfg || cfg.trim().length < 200) throw new Error('printer.cfg read was empty');
+      let nextCfg = cfg;
+      if (/\[load_cell_probe\][\s\S]*?trigger_force:\s*\d+(?:\.\d+)?/.test(cfg)) {
+        nextCfg = cfg.replace(/(trigger_force:\s*)\d+(?:\.\d+)?/, `$1${targetForce}`);
+      } else {
+        nextCfg = cfg.replace(/(\[load_cell_probe\])/, `$1\ntrigger_force: ${targetForce}`);
+      }
+      await MR.writeConfig(nextCfg, 'printer.cfg');
+      storedForce = targetForce;
+      $('#lcc-f-stored', n).textContent = `CONFIG STORED FORCE: ${storedForce} g`;
+      $('#lcc-tab-force', n).textContent = `⚙ Trigger Force (${storedForce}g)`;
+      $('#lcc-f-delta', n).textContent = `✓ Saved ${storedForce}g & restarting Klipper…`;
+      $('#lcc-f-delta', n).style.color = '#34D399';
+      b.textContent = '✓ Saved to printer.cfg';
+      await MR.fwRestart();
+      toast('✓ Trigger force saved');
+    } catch (e) {
+      b.disabled = false; b.textContent = `Retry Save ${targetForce}g`;
+      setLog('⚠ Save trigger_force failed: ' + (e.message || e), '#FCA5A5');
+    }
+  };
+
+  $('#lcc-q-tare', n).onclick = async () => {
+    await MR.tare();
+    ga.set({ val: 0 });
+    toast('✓ Sensor tared');
+  };
+  $('#lcc-q-tap', n).onclick = async () => {
+    const b = $('#lcc-q-tap', n); b.disabled = true;
+    await MR.gcode('LOAD_CELL_TEST_TAP', 30000);
+    b.disabled = false;
   };
 }
 
