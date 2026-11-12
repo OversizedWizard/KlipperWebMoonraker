@@ -283,6 +283,7 @@ function probeAccuracy(){
       <div class="box" id="amsg" style="font-weight:700;text-align:center">Ready. Toolhead will probe bed center.</div>
     </div>
     <div class="sub-web-right">
+      <div id="averdict" class="box" style="display:none;text-align:center;padding:10px 14px;font-weight:800;font-size:14px;border-radius:8px"></div>
       <div class="grid3">
         <div class="box"><div class="h">RANGE (MAX-MIN)</div><div class="big" id="ar" style="font-size:20px">--</div></div>
         <div class="box"><div class="h">AVERAGE Z</div><div class="big" id="av" style="font-size:20px">--</div></div>
@@ -298,29 +299,74 @@ function probeAccuracy(){
   $('#aa',n).append(ch.el);openSub('Probe Accuracy',n);
   $('#an',n).onchange=()=>{N=parseInt($('#an',n).value)};
   $('#arun',n).onclick=async()=>{
-    const b=$('#arun',n);b.disabled=true;$('#amsg',n).textContent=`Probing bed center (${N} samples @ ${ps} mm/s, retract ${rd} mm)…`;await ensureHomed();
+    const b=$('#arun',n);b.disabled=true;
+    $('#amsg',n).innerHTML=`<span style="color:#00E5FF">Probing bed center (${N} samples @ ${ps} mm/s, retract ${rd} mm)…</span>`;
+    $('#averdict',n).style.display='none';
     ch.set({pts:[]});$('#ar',n).textContent='--';$('#av',n).textContent='--';$('#as',n).textContent='--';
+    await ensureHomed();
     const cap=gcodeCapture();
-    const po=probeOff();const iv=setInterval(()=>{const zs=cap.lines.map(l=>(l.match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);if(zs.length)ch.set({pts:zs})},400);
+    const po=probeOff();
+    const iv=setInterval(()=>{
+      const zs=cap.lines.map(l=>(l.match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);
+      if(zs.length){
+        ch.set({pts:zs});
+        $('#amsg',n).innerHTML=`<span style="color:#00E5FF">Probing sample ${zs.length} of ${N} (Z = ${zs[zs.length-1].toFixed(4)} mm)…</span>`;
+      }
+    },350);
     const tare=MR.tareGcode();
     const ok=await MR.gcode(`G90\nG1 Z10 F600\nG1 X${(bs.x/2-po.x).toFixed(1)} Y${(bs.y/2-po.y).toFixed(1)} F6000\n${tare}PROBE_ACCURACY SAMPLES=${N} PROBE_SPEED=${ps.toFixed(1)} LIFT_SPEED=${ls.toFixed(1)} SAMPLE_RETRACT_DIST=${rd.toFixed(1)}`,600000);
+    await new Promise(r=>setTimeout(r,400));
     clearInterval(iv);cap.stop();b.disabled=false;
+
     let zs=cap.lines.map(l=>(l.match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);
-    if(zs.length<N){
-      const store=await MR.gcodeStore(N+20);
-      const storeZs=store.map(it=>((it.message||'').match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);
-      if(storeZs.length>=zs.length)zs=storeZs.slice(-N);
+    const store=await MR.gcodeStore(N+25);
+    const storeZs=store.map(it=>((it.message||'').match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);
+    if(storeZs.length>zs.length) zs=storeZs.slice(-N);
+    if(zs.length) ch.set({pts:zs});
+
+    const sumRe=/range\s+(-?[\d.]+).*?average\s+(-?[\d.]+).*?deviation\s+(-?[\d.]+)/i;
+    const allLines=[...cap.lines,...store.map(s=>s.message||'')].join('\n');
+    const m=allLines.match(sumRe);
+
+    let rng=null,avg=null,sd=null;
+    if(m){
+      rng=Math.abs(parseFloat(m[1]));
+      avg=parseFloat(m[2]);
+      sd=parseFloat(m[3]);
+    } else if(zs.length>=2){
+      const max=Math.max(...zs),min=Math.min(...zs);
+      rng=max-min;
+      avg=zs.reduce((a,b)=>a+b,0)/zs.length;
+      const v=zs.reduce((a,b)=>a+Math.pow(b-avg,2),0)/zs.length;
+      sd=Math.sqrt(v);
     }
-    if(zs.length)ch.set({pts:zs});
-    const all=cap.lines.join('\n');
-    const m=all.match(/range\s+([\d.]+).*average\s+([\d.]+).*deviation\s+([\d.]+)/i);
-    if(m){$('#ar',n).textContent=m[1];$('#av',n).textContent=m[2];$('#as',n).textContent=m[3];const rng=+m[1],sd=+m[3];
-      const okAcc=sd<=.025&&rng<=.08;
-      const tier=sd<=.0025?'EXCELLENT':sd<=.005?'GOOD':sd<=.01?'FAIR':'PASS';
-      $('#amsg',n).innerHTML=okAcc
-        ?`<b style="color:#34D399">✔ ACCEPTABLE (${tier} • σ=${sd.toFixed(4)} mm, Range=${rng.toFixed(4)} mm)</b>`
-        :`<b style="color:#EF4444">✖ NOT ACCEPTABLE (σ=${sd.toFixed(4)} mm, Range=${rng.toFixed(4)} mm — reduce speed or check mount)</b>`}
-    else $('#amsg',n).textContent=ok?'Done.':'⚠ Failed';await MR.gcode('G1 Z10 F600');
+
+    if(rng!==null && avg!==null && sd!==null){
+      $('#ar',n).textContent=rng.toFixed(4);
+      $('#av',n).textContent=avg.toFixed(4);
+      $('#as',n).textContent=sd.toFixed(4);
+
+      const okAcc=sd<=0.025 && rng<=0.08;
+      const tier=sd<=0.0025?'EXCELLENT':sd<=0.005?'GOOD':sd<=0.01?'FAIR':'PASS';
+      const vBox=$('#averdict',n);
+      vBox.style.display='block';
+      if(okAcc){
+        vBox.style.background='rgba(52,211,153,0.15)';
+        vBox.style.border='1px solid #34D399';
+        vBox.style.color='#34D399';
+        vBox.innerHTML=`✔ ACCEPTABLE (${tier}) &bull; &sigma; = ${sd.toFixed(4)} mm`;
+        $('#amsg',n).innerHTML=`<b style="color:#34D399">✔ ACCEPTABLE (${tier})</b><br><span style="color:#94A3B8;font-size:12px">Range = ${rng.toFixed(4)} mm, StdDev = ${sd.toFixed(4)} mm</span>`;
+      } else {
+        vBox.style.background='rgba(239,68,68,0.15)';
+        vBox.style.border='1px solid #EF4444';
+        vBox.style.color='#EF4444';
+        vBox.innerHTML=`✖ NOT ACCEPTABLE &bull; &sigma; = ${sd.toFixed(4)} mm`;
+        $('#amsg',n).innerHTML=`<b style="color:#EF4444">✖ NOT ACCEPTABLE</b><br><span style="color:#FCA5A5;font-size:12px">StdDev (${sd.toFixed(4)} mm) or Range (${rng.toFixed(4)} mm) exceeds limit. Reduce probe speed.</span>`;
+      }
+    } else {
+      $('#amsg',n).textContent=ok?'Done (No probe points recorded).':'⚠ Test Failed';
+    }
+    await MR.gcode('G1 Z10 F600');
   };
 }
 
