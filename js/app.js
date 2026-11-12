@@ -317,6 +317,7 @@ const SUB_ROUTES = {
   'sub-phase': () => endstopPhaseSub(),
   'sub-delta': () => deltaCalSub(),
   'sub-acc': () => probeAccuracy(),
+  'sub-probe-settings': () => probeSettingsScreen(),
   'sub-lcw': () => loadCellTest(),
   'sub-pid': () => pidTune(),
   'sub-log-klippy': () => {

@@ -273,12 +273,9 @@ function probeAccuracy(){
   const bs=bedSize();const ch=Anim.chart({h:200,scatter:true,dec:4,minPad:.002,empty:'Samples will plot here in real time'});let N=10;
   const pSec=['load_cell_probe','probe','bltouch','smart_effector','beacon'].find(k=>MR.config[k])||'load_cell_probe';
   const pCfg=MR.config[pSec]||{};
-  const cfgPs=+(parseFloat(pCfg.speed)||8.0).toFixed(1);
-  const cfgLs=+(parseFloat(pCfg.lift_speed)||10.0).toFixed(1);
-  const cfgRd=+(parseFloat(pCfg.sample_retract_dist)||3.0).toFixed(1);
-  let ps=+(parseFloat(localStorage.getItem('probe_speed'))||cfgPs).toFixed(1);
-  let ls=+(parseFloat(localStorage.getItem('probe_lift_speed'))||cfgLs).toFixed(1);
-  let rd=+(parseFloat(localStorage.getItem('probe_retract_dist'))||cfgRd).toFixed(1);
+  const ps=+(parseFloat(localStorage.getItem('probe_speed'))||parseFloat(pCfg.speed)||8.0).toFixed(1);
+  const ls=+(parseFloat(localStorage.getItem('probe_lift_speed'))||parseFloat(pCfg.lift_speed)||10.0).toFixed(1);
+  const rd=+(parseFloat(localStorage.getItem('probe_retract_dist'))||parseFloat(pCfg.sample_retract_dist)||3.0).toFixed(1);
 
   const n=el(`<div class="sub-web-grid">
     <div class="sub-web-left">
@@ -291,49 +288,135 @@ function probeAccuracy(){
         <div class="box"><div class="h">AVERAGE Z</div><div class="big" id="av" style="font-size:20px">--</div></div>
         <div class="box"><div class="h">STD DEV (σ)</div><div class="big" id="as" style="font-size:20px">--</div></div>
       </div>
-      <div class="box col">
-        <div class="row" style="justify-content:space-between;align-items:center">
-          <div class="h" style="margin:0">PROBE SETTINGS (LIVE OVERRIDE)</div>
-          <button class="btn sm" id="areset" title="Reset to printer.cfg values">↺ Config</button>
-        </div>
-        <div class="grid3" style="margin-top:6px">
-          <label class="col" style="gap:4px;font-size:11px;color:#94A3B8;font-weight:700">PROBE SPEED (mm/s)
-            <input id="aps" type="number" min="1" max="25" step="0.5" value="${ps}" style="min-height:36px">
-          </label>
-          <label class="col" style="gap:4px;font-size:11px;color:#94A3B8;font-weight:700">LIFT SPEED (mm/s)
-            <input id="als" type="number" min="2" max="40" step="1" value="${ls}" style="min-height:36px">
-          </label>
-          <label class="col" style="gap:4px;font-size:11px;color:#94A3B8;font-weight:700">RETRACT HEIGHT (mm)
-            <input id="ard" type="number" min="0.5" max="15" step="0.5" value="${rd}" style="min-height:36px">
-          </label>
-        </div>
-      </div>
       <div class="box col"><div class="h">SAMPLES COUNT</div>
         <div class="row"><select id="an" class="grow" style="min-height:42px">${[5,10,20,30].map(v=>`<option ${v===10?'selected':''}>${v} Samples</option>`).join('')}</select>
-        <button class="btn pri grow" id="arun" style="min-height:42px;font-weight:800">▶ Run PROBE_ACCURACY</button></div>
-        <button class="btn sm" id="asavecfg" style="margin-top:6px;align-self:flex-end">💾 Save Speeds/Height to printer.cfg</button>
+        <button class="btn pri grow" id="arun" style="min-height:44px;font-weight:800;font-size:14px">▶ Run PROBE_ACCURACY</button></div>
+        <div class="sub" style="font-size:11px;color:#94A3B8;margin-top:6px;text-align:center">Active: <b>${ps} mm/s</b> • Retract: <b>${rd} mm</b> • Lift: <b>${ls} mm/s</b> (Configure in Settings)</div>
       </div>
     </div>
   </div>`);
   $('#aa',n).append(ch.el);openSub('Probe Accuracy',n);
-  const syncInputs=()=>{
-    ps=Math.max(0.5,Math.min(25,parseFloat($('#aps',n).value)||cfgPs));
-    ls=Math.max(1,Math.min(40,parseFloat($('#als',n).value)||cfgLs));
-    rd=Math.max(0.5,Math.min(15,parseFloat($('#ard',n).value)||cfgRd));
-    localStorage.setItem('probe_speed',ps);
-    localStorage.setItem('probe_lift_speed',ls);
-    localStorage.setItem('probe_retract_dist',rd);
-  };
-  ['#aps','#als','#ard'].forEach(id=>$(id,n).onchange=syncInputs);
-  $('#areset',n).onclick=()=>{
-    ps=cfgPs;ls=cfgLs;rd=cfgRd;
-    $('#aps',n).value=ps;$('#als',n).value=ls;$('#ard',n).value=rd;
-    syncInputs();toast('Reset to printer.cfg defaults');
-  };
   $('#an',n).onchange=()=>{N=parseInt($('#an',n).value)};
-  $('#asavecfg',n).onclick=async()=>{
-    syncInputs();
-    const btn=$('#asavecfg',n);btn.disabled=true;btn.textContent='Saving…';
+  $('#arun',n).onclick=async()=>{
+    const b=$('#arun',n);b.disabled=true;$('#amsg',n).textContent=`Probing bed center (${N} samples @ ${ps} mm/s, retract ${rd} mm)…`;await ensureHomed();
+    const cap=gcodeCapture();
+    const po=probeOff();const iv=setInterval(()=>{const zs=cap.lines.map(l=>(l.match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);ch.set({pts:zs})},500);
+    const tare=MR.tareGcode();
+    const ok=await MR.gcode(`G90\nG1 Z10 F600\nG1 X${(bs.x/2-po.x).toFixed(1)} Y${(bs.y/2-po.y).toFixed(1)} F6000\n${tare}PROBE_ACCURACY SAMPLES=${N} PROBE_SPEED=${ps.toFixed(1)} LIFT_SPEED=${ls.toFixed(1)} SAMPLE_RETRACT_DIST=${rd.toFixed(1)}`,600000);
+    clearInterval(iv);cap.stop();b.disabled=false;
+    const all=cap.lines.join('\n');
+    const m=all.match(/range\s+([\d.]+).*average\s+([\d.]+).*deviation\s+([\d.]+)/i);
+    if(m){$('#ar',n).textContent=m[1];$('#av',n).textContent=m[2];$('#as',n).textContent=m[3];const rng=+m[1],sd=+m[3];
+      const okAcc=sd<=.025&&rng<=.08;
+      const tier=sd<=.0025?'EXCELLENT':sd<=.005?'GOOD':sd<=.01?'FAIR':'PASS';
+      $('#amsg',n).innerHTML=okAcc
+        ?`<b style="color:#34D399">✔ ACCEPTABLE (${tier} • σ=${sd.toFixed(4)} mm, Range=${rng.toFixed(4)} mm)</b>`
+        :`<b style="color:#EF4444">✖ NOT ACCEPTABLE (σ=${sd.toFixed(4)} mm, Range=${rng.toFixed(4)} mm — reduce speed or check mount)</b>`}
+    else $('#amsg',n).textContent=ok?'Done.':'⚠ Failed';await MR.gcode('G1 Z10 F600');
+  };
+}
+
+/* ---- Probe speeds & heights setting screen ---- */
+function probeSettingsScreen(){
+  const pSec=['load_cell_probe','probe','bltouch','smart_effector','beacon'].find(k=>MR.config[k])||'load_cell_probe';
+  const pCfg=MR.config[pSec]||{};
+  const cfgPs=+(parseFloat(pCfg.speed)||8.0).toFixed(1);
+  const cfgLs=+(parseFloat(pCfg.lift_speed)||10.0).toFixed(1);
+  const cfgRd=+(parseFloat(pCfg.sample_retract_dist)||3.0).toFixed(1);
+  let ps=+(parseFloat(localStorage.getItem('probe_speed'))||cfgPs).toFixed(1);
+  let ls=+(parseFloat(localStorage.getItem('probe_lift_speed'))||cfgLs).toFixed(1);
+  let rd=+(parseFloat(localStorage.getItem('probe_retract_dist'))||cfgRd).toFixed(1);
+
+  const n=el(`<div class="sub-web-grid">
+    <div class="sub-web-left">
+      <div class="box col" style="gap:10px">
+        <div class="h">PROBE PARAMETERS [${pSec.toUpperCase()}]</div>
+        <div style="font-size:12px;color:#94A3B8;line-height:1.5">
+          Tweak descent speed, retract clearance, and lift speed without modifying config files.
+          Values are active immediately for accuracy tests, bed leveling, and probing.
+        </div>
+        <div class="box mono" style="font-size:11px;color:#38BDF8;background:rgba(0,229,255,0.06)">
+          Config Defaults: speed=${cfgPs} mm/s • lift=${cfgLs} mm/s • retract=${cfgRd} mm
+        </div>
+        <button class="btn" id="ps-reset" style="min-height:38px">↺ Reset to printer.cfg Defaults</button>
+      </div>
+    </div>
+    <div class="sub-web-right">
+      <div class="box col">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div><div class="h">PROBE DESCENT SPEED</div><div class="sub">Speed nozzle approaches bed to sense contact</div></div>
+          <b id="ps-val-ps" style="font-size:22px;color:#00E5FF;font-family:monospace">${ps} mm/s</b>
+        </div>
+        <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+          ${[2,3,4,6,8].map(v=>`<button class="btn sm grow ${ps===v?'on':''}" data-ps="${v}">${v} mm/s</button>`).join('')}
+          <button class="btn sm" data-step-ps="-0.5">– 0.5</button>
+          <button class="btn sm" data-step-ps="+0.5">+ 0.5</button>
+        </div>
+      </div>
+
+      <div class="box col">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div><div class="h">LIFT SPEED (RETRACT)</div><div class="sub">Speed nozzle raises away after touching</div></div>
+          <b id="ps-val-ls" style="font-size:22px;color:#FBBF24;font-family:monospace">${ls} mm/s</b>
+        </div>
+        <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+          ${[5,8,10,15].map(v=>`<button class="btn sm grow ${ls===v?'on':''}" data-ls="${v}">${v} mm/s</button>`).join('')}
+          <button class="btn sm" data-step-ls="-1.0">– 1.0</button>
+          <button class="btn sm" data-step-ls="+1.0">+ 1.0</button>
+        </div>
+      </div>
+
+      <div class="box col">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div><div class="h">RETRACT HEIGHT (CLEARANCE)</div><div class="sub">Clearance lifted between consecutive taps</div></div>
+          <b id="ps-val-rd" style="font-size:22px;color:#34D399;font-family:monospace">${rd} mm</b>
+        </div>
+        <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+          ${[1.0,1.5,2.0,3.0,4.0].map(v=>`<button class="btn sm grow ${rd===v?'on':''}" data-rd="${v}">${v} mm</button>`).join('')}
+          <button class="btn sm" data-step-rd="-0.5">– 0.5</button>
+          <button class="btn sm" data-step-rd="+0.5">+ 0.5</button>
+        </div>
+      </div>
+
+      <div class="row" style="gap:8px;margin-top:4px">
+        <button class="btn green grow" id="ps-apply" style="min-height:44px;font-size:13px;font-weight:800">✔ Apply (Active for Probing)</button>
+        <button class="btn pri grow" id="ps-save" style="min-height:44px;font-size:13px;font-weight:800">💾 Save to printer.cfg & Restart</button>
+      </div>
+    </div>
+  </div>`);
+
+  openSub('Probe Speeds & Heights', n);
+  const upd=()=>{
+    $('#ps-val-ps',n).textContent=`${ps.toFixed(1)} mm/s`;
+    $('#ps-val-ls',n).textContent=`${ls.toFixed(1)} mm/s`;
+    $('#ps-val-rd',n).textContent=`${rd.toFixed(1)} mm`;
+    n.querySelectorAll('[data-ps]').forEach(b=>b.classList.toggle('on',Math.abs(+b.dataset.ps-ps)<0.05));
+    n.querySelectorAll('[data-ls]').forEach(b=>b.classList.toggle('on',Math.abs(+b.dataset.ls-ls)<0.05));
+    n.querySelectorAll('[data-rd]').forEach(b=>b.classList.toggle('on',Math.abs(+b.dataset.rd-rd)<0.05));
+  };
+  n.querySelectorAll('[data-ps]').forEach(b=>b.onclick=()=>{ps=+b.dataset.ps;upd()});
+  n.querySelectorAll('[data-ls]').forEach(b=>b.onclick=()=>{ls=+b.dataset.ls;upd()});
+  n.querySelectorAll('[data-rd]').forEach(b=>b.onclick=()=>{rd=+b.dataset.rd;upd()});
+  n.querySelectorAll('[data-step-ps]').forEach(b=>b.onclick=()=>{ps=Math.max(1,Math.min(25,+(ps+(+b.dataset.stepPs)).toFixed(1)));upd()});
+  n.querySelectorAll('[data-step-ls]').forEach(b=>b.onclick=()=>{ls=Math.max(2,Math.min(40,+(ls+(+b.dataset.stepLs)).toFixed(1)));upd()});
+  n.querySelectorAll('[data-step-rd]').forEach(b=>b.onclick=()=>{rd=Math.max(0.5,Math.min(15,+(rd+(+b.dataset.stepRd)).toFixed(1)));upd()});
+
+  $('#ps-reset',n).onclick=()=>{
+    ps=cfgPs;ls=cfgLs;rd=cfgRd;upd();
+    localStorage.removeItem('probe_speed');
+    localStorage.removeItem('probe_lift_speed');
+    localStorage.removeItem('probe_retract_dist');
+    toast('Reset to printer.cfg defaults');
+  };
+  $('#ps-apply',n).onclick=()=>{
+    localStorage.setItem('probe_speed',ps.toFixed(1));
+    localStorage.setItem('probe_lift_speed',ls.toFixed(1));
+    localStorage.setItem('probe_retract_dist',rd.toFixed(1));
+    toast(`✓ Applied: Speed=${ps.toFixed(1)}mm/s, Retract=${rd.toFixed(1)}mm, Lift=${ls.toFixed(1)}mm/s`);
+    setTimeout(closeSub, 800);
+  };
+  $('#ps-save',n).onclick=async()=>{
+    const btn=$('#ps-save',n);btn.disabled=true;btn.textContent='Saving to printer.cfg…';
     try{
       let txt=await MR.readConfig();
       if(!txt)throw new Error('Could not read printer.cfg');
@@ -354,31 +437,16 @@ function probeAccuracy(){
       fd.append('root','config');
       const r=await fetch(`${MR.base}/server/files/upload`,{method:'POST',body:fd});
       if(!r.ok)throw new Error(`Upload HTTP ${r.status}`);
+      localStorage.setItem('probe_speed',ps.toFixed(1));
+      localStorage.setItem('probe_lift_speed',ls.toFixed(1));
+      localStorage.setItem('probe_retract_dist',rd.toFixed(1));
       await MR.gcode('FIRMWARE_RESTART');
-      toast('✓ Probe settings saved & Klipper restarting');
+      toast('✓ Saved to printer.cfg & Klipper restarting');
+      closeSub();
     }catch(e){
       toast('⚠ Save failed: '+(e.message||e));
-    }finally{
-      btn.disabled=false;btn.textContent='💾 Save Speeds/Height to printer.cfg';
+      btn.disabled=false;btn.textContent='💾 Save to printer.cfg & Restart';
     }
-  };
-  $('#arun',n).onclick=async()=>{
-    syncInputs();
-    const b=$('#arun',n);b.disabled=true;$('#amsg',n).textContent=`Probing bed center (${N} samples @ ${ps}mm/s, retract ${rd}mm)…`;await ensureHomed();
-    const cap=gcodeCapture();
-    const po=probeOff();const iv=setInterval(()=>{const zs=cap.lines.map(l=>(l.match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);ch.set({pts:zs})},500);
-    const tare=MR.tareGcode();
-    const ok=await MR.gcode(`G90\nG1 Z10 F600\nG1 X${(bs.x/2-po.x).toFixed(1)} Y${(bs.y/2-po.y).toFixed(1)} F6000\n${tare}PROBE_ACCURACY SAMPLES=${N} PROBE_SPEED=${ps.toFixed(1)} LIFT_SPEED=${ls.toFixed(1)} SAMPLE_RETRACT_DIST=${rd.toFixed(1)}`,600000);
-    clearInterval(iv);cap.stop();b.disabled=false;
-    const all=cap.lines.join('\n');
-    const m=all.match(/range\s+([\d.]+).*average\s+([\d.]+).*deviation\s+([\d.]+)/i);
-    if(m){$('#ar',n).textContent=m[1];$('#av',n).textContent=m[2];$('#as',n).textContent=m[3];const rng=+m[1],sd=+m[3];
-      const okAcc=sd<=.025&&rng<=.08;
-      const tier=sd<=.0025?'EXCELLENT':sd<=.005?'GOOD':sd<=.01?'FAIR':'PASS';
-      $('#amsg',n).innerHTML=okAcc
-        ?`<b style="color:#34D399">✔ ACCEPTABLE (${tier} • σ=${sd.toFixed(4)} mm, Range=${rng.toFixed(4)} mm)</b>`
-        :`<b style="color:#EF4444">✖ NOT ACCEPTABLE (σ=${sd.toFixed(4)} mm, Range=${rng.toFixed(4)} mm — reduce speed or check mount)</b>`}
-    else $('#amsg',n).textContent=ok?'Done.':'⚠ Failed';await MR.gcode('G1 Z10 F600');
   };
 }
 

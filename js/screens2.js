@@ -6,6 +6,7 @@ const CAL = {
   screws_tilt: { icon: 'screws', title: 'Bed Screws Adjust', cmd: 'BED_SCREWS', desc: 'Bed corner leveling with CW/CCW screw turns.', custom: 'screws' },
   dual_z_trim: { icon: 'gantry', title: 'Manual Dual Z Trim', cmd: 'DUAL_Z_TRIM', desc: 'Dual Z leadscrew alignment & level check.', custom: 'dualz' },
   probe_acc: { icon: 'calibrate', title: 'Probe Accuracy Test', cmd: 'PROBE_ACCURACY', desc: 'Repeatability standard deviation (σ) test.', custom: 'acc' },
+  probe_settings: { icon: 'tune', title: 'Probe Speeds & Heights', cmd: 'PROBE_PARAMS', desc: 'Tune descent speed, retract clearance & lift speed.', custom: 'probe_settings' },
 
   // Gantry Tramming & Multi-Motor Z
   z_tilt: { icon: 'gantry', title: 'Z-Tilt Adjust', cmd: 'Z_TILT_ADJUST', desc: 'Automatic tramming for independent dual/triple Z.', custom: 'z_tilt' },
@@ -39,6 +40,7 @@ function supported(id) {
     case 'dual_z_trim': return !has('z_tilt', 'quad_gantry_level') && has('probe', 'bltouch', 'load_cell_probe', 'beacon') && kin !== 'delta';
     case 'input_shaper': return has('input_shaper', 'resonance_tester', 'adxl345');
     case 'screws_tilt': return has('screws_tilt_adjust', 'bed_screws');
+    case 'probe_settings': return has('probe', 'bltouch', 'smart_effector', 'beacon', 'load_cell_probe');
     case 'axis_twist': return has('axis_twist_compensation');
     case 'endstop_phase': return has('endstop_phase');
     default: return true;
@@ -58,6 +60,7 @@ function openCal(k) {
     screws: bedScrews,
     dualz: dualZTrim,
     acc: probeAccuracy,
+    probe_settings: probeSettingsScreen,
     z_tilt: zTiltSub,
     qgl: quadGantrySub,
     load_cell_cal: loadCellCal,
@@ -131,7 +134,7 @@ App.pages.settings = (() => {
     return parts.length ? parts.join(' • ') : 'STUDIO & TUNING';
   };
   const draw = () => {
-    const cal = ['bed_mesh', 'probe_cal', 'screws_tilt', 'dual_z_trim', 'probe_acc', 'pid_tune', 'load_cell_weight_test'].filter(supported);
+    const cal = ['bed_mesh', 'probe_cal', 'probe_acc', 'probe_settings', 'screws_tilt', 'dual_z_trim', 'pid_tune', 'load_cell_weight_test'].filter(supported);
     root.innerHTML = `${cal.length ? '<div class="hdr">BED & PROBE CALIBRATION SHORTCUTS</div><div class="grid2">' + cal.map(k => cardHTML(k, CAL[k])).join('') + '</div>' : ''}
     <div class="hdr">DISPLAY, ALERTS & BACKUP</div><div class="grid2">
      <div class="cc" id="s-sleep">${ICON('clock')}<div><div class="ti">Screen Sleep Timer</div><div class="ds">Auto-dim / low-power sleep screen after inactivity.</div><span class="cmd" id="s-sleep-badge">TIMEOUT: ${getSleepLabel().toUpperCase()}</span></div><span class="ar">›</span></div>
