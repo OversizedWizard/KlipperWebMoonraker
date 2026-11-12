@@ -2,7 +2,7 @@
 function gcodeCapture(){const lines=[];const f=l=>lines.push(l);MR.on('gcode',f);return{lines,stop(){const a=MR.listeners.gcode;if(a){const i=a.indexOf(f);if(i!==-1)a.splice(i,1)}}}}
 function bedSize(){const c=MR.config;const n=k=>parseFloat(c[k]?.position_max)||235;return{x:n('stepper_x'),y:n('stepper_y')}}
 function probeOff(){const c=MR.config.load_cell_probe||MR.config.probe||{};return{x:parseFloat(c.x_offset)||0,y:parseFloat(c.y_offset)||0}}
-const PROBE_RESULT_RE=/Result(?:\s+is|:\s+at\s+[\d.,-]+\s+estimate\s+contact\s+at)\s+z=\s*([\d.-]+)/i;
+const PROBE_RESULT_RE=/(?:probe:?.*(?:is|contact\s+at)|Result(?:\s+is|:\s+at\s+[\d.,-]+\s+estimate\s+contact\s+at))\s+z=\s*(-?[\d.]+)/i;
 async function probeAt(x,y){
   const cap=gcodeCapture();const po=probeOff();
   const tare=MR.tareGcode();
@@ -299,11 +299,19 @@ function probeAccuracy(){
   $('#an',n).onchange=()=>{N=parseInt($('#an',n).value)};
   $('#arun',n).onclick=async()=>{
     const b=$('#arun',n);b.disabled=true;$('#amsg',n).textContent=`Probing bed center (${N} samples @ ${ps} mm/s, retract ${rd} mm)…`;await ensureHomed();
+    ch.set({pts:[]});$('#ar',n).textContent='--';$('#av',n).textContent='--';$('#as',n).textContent='--';
     const cap=gcodeCapture();
-    const po=probeOff();const iv=setInterval(()=>{const zs=cap.lines.map(l=>(l.match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);ch.set({pts:zs})},500);
+    const po=probeOff();const iv=setInterval(()=>{const zs=cap.lines.map(l=>(l.match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);if(zs.length)ch.set({pts:zs})},400);
     const tare=MR.tareGcode();
     const ok=await MR.gcode(`G90\nG1 Z10 F600\nG1 X${(bs.x/2-po.x).toFixed(1)} Y${(bs.y/2-po.y).toFixed(1)} F6000\n${tare}PROBE_ACCURACY SAMPLES=${N} PROBE_SPEED=${ps.toFixed(1)} LIFT_SPEED=${ls.toFixed(1)} SAMPLE_RETRACT_DIST=${rd.toFixed(1)}`,600000);
     clearInterval(iv);cap.stop();b.disabled=false;
+    let zs=cap.lines.map(l=>(l.match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);
+    if(zs.length<N){
+      const store=await MR.gcodeStore(N+20);
+      const storeZs=store.map(it=>((it.message||'').match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);
+      if(storeZs.length>=zs.length)zs=storeZs.slice(-N);
+    }
+    if(zs.length)ch.set({pts:zs});
     const all=cap.lines.join('\n');
     const m=all.match(/range\s+([\d.]+).*average\s+([\d.]+).*deviation\s+([\d.]+)/i);
     if(m){$('#ar',n).textContent=m[1];$('#av',n).textContent=m[2];$('#as',n).textContent=m[3];const rng=+m[1],sd=+m[3];
