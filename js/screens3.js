@@ -299,8 +299,12 @@ function probeAccuracy(){
     clearInterval(iv);cap.stop();b.disabled=false;
     const all=cap.lines.join('\n');
     const m=all.match(/range\s+([\d.]+).*average\s+([\d.]+).*deviation\s+([\d.]+)/i);
-    if(m){$('#ar',n).textContent=m[1];$('#av',n).textContent=m[2];$('#as',n).textContent=m[3];const sd=+m[3];
-      $('#amsg',n).innerHTML=sd<=.0025?'<b style="color:#34D399">EXCELLENT (σ ≤ 0.0025 mm)</b>':sd<=.005?'<b style="color:#34D399">GOOD (σ ≤ 0.005 mm)</b>':sd<=.01?'<b style="color:#FBBF24">FAIR (σ ≤ 0.01 mm)</b>':'<b style="color:#EF4444">POOR</b>'}
+    if(m){$('#ar',n).textContent=m[1];$('#av',n).textContent=m[2];$('#as',n).textContent=m[3];const rng=+m[1],sd=+m[3];
+      const okAcc=sd<=.025&&rng<=.08;
+      const tier=sd<=.0025?'EXCELLENT':sd<=.005?'GOOD':sd<=.01?'FAIR':'PASS';
+      $('#amsg',n).innerHTML=okAcc
+        ?`<b style="color:#34D399">✔ ACCEPTABLE (${tier} • σ=${sd.toFixed(4)} mm, Range=${rng.toFixed(4)} mm)</b>`
+        :`<b style="color:#EF4444">✖ NOT ACCEPTABLE (σ=${sd.toFixed(4)} mm, Range=${rng.toFixed(4)} mm — reduce speed or check mount)</b>`}
     else $('#amsg',n).textContent=ok?'Done.':'⚠ Failed';await MR.gcode('G1 Z10 F600');
   };
 }
