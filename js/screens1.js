@@ -106,8 +106,8 @@ App.pages.spool=(()=>{
             </div>
             <div class="grid2" style="gap:8px">
               <div class="box" style="background:rgba(255,90,95,0.1);border-color:rgba(255,90,95,0.35);padding:6px 8px">
-                <div style="color:#94A3B8;font-size:9px;font-weight:800">NOZZLE PRESET</div>
-                <b style="color:#FF5A5F;font-size:15px">${sp.nozzle} °C</b>
+                <div style="color:#94A3B8;font-size:9px;font-weight:800">NOZZLE TEMP</div>
+                <b id="snoz-live" style="color:#FF5A5F;font-size:15px">${sp.nozzle} °C</b>
               </div>
               <div class="box" style="background:rgba(0,229,255,0.1);border-color:rgba(0,229,255,0.35);padding:6px 8px">
                 <div style="color:#94A3B8;font-size:9px;font-weight:800">BED PRESET</div>
@@ -129,15 +129,21 @@ App.pages.spool=(()=>{
       </div>
       <div class="col grow" style="flex:1;min-width:260px;gap:10px">
         <div class="card col" style="gap:8px;padding:12px">
-          <div class="hdr" style="margin:0">FILAMENT ACTIONS</div>
-          <div class="row" style="gap:8px">
-            <button class="btn green grow" id="sload" style="min-height:42px">📥 Load</button>
-            <button class="btn slate grow" id="sunl" style="min-height:42px">📤 Unload</button>
+          <div class="row" style="align-items:center;justify-content:space-between">
+            <div class="hdr" style="margin:0">FILAMENT ACTIONS</div>
+            <span class="pill" id="sact-noz" style="font-size:11px;font-weight:800">Nozzle: --.-°C</span>
           </div>
-          <button class="btn orange" id="sheat" style="min-height:38px">🔥 Preheat Nozzle to Spool Temp</button>
+          <div class="row" style="gap:8px">
+            <button class="btn green grow" id="sload" style="min-height:42px">📥 Load (${sp.nozzle}°C)</button>
+            <button class="btn slate grow" id="sunl" style="min-height:42px">📤 Unload (${sp.nozzle}°C)</button>
+          </div>
+          <button class="btn orange" id="sheat" style="min-height:38px">🔥 Preheat Nozzle to ${sp.nozzle}°C</button>
         </div>
         <div class="card col" style="gap:8px;padding:12px">
-          <div class="hdr" style="margin:0">MANUAL EXTRUDE / RETRACT</div>
+          <div class="row" style="align-items:center;justify-content:space-between">
+            <div class="hdr" style="margin:0">MANUAL EXTRUDE / RETRACT</div>
+            <span class="sub" id="sext-noz" style="font-size:11px;font-weight:700">Nozzle: --.-°C</span>
+          </div>
           <div class="row" style="gap:6px">${[5,10,25,50].map(d=>`<button class="btn sm grow ${d===dist?'on':''}" data-l="${d}">${d}mm</button>`).join('')}</div>
           <div class="row" style="gap:8px">
             <button class="btn grow" style="border-color:#10B981;color:#34D399;min-height:38px" id="sext">⬇ Extrude +${dist}mm</button>
@@ -174,6 +180,19 @@ App.pages.spool=(()=>{
       lastFilMm=null;
     }
     const b=$('#slive');if(!b)return;const e=s.extruder||{},c=e.temperature||0,t=e.target||0;
+    const curSp=spools[slot]||{nozzle:210};
+    const snl=$('#snoz-live',root);if(snl)snl.textContent=c>0?`${c.toFixed(1)} / ${curSp.nozzle} °C`:`${curSp.nozzle} °C`;
+    const san=$('#sact-noz',root);
+    if(san){
+      if(c>=180){san.className='pill bad';san.textContent=`🔥 Nozzle: ${c.toFixed(1)}°C (HOT)`}
+      else if(t>0){san.className='pill';san.textContent=`🔥 Heating: ${c.toFixed(1)}°C → ${Math.round(t)}°C`}
+      else{san.className='pill info';san.textContent=`● Nozzle: ${c.toFixed(1)}°C / ${curSp.nozzle}°C`}
+    }
+    const sex=$('#sext-noz',root);
+    if(sex){
+      sex.textContent=`Nozzle: ${c.toFixed(1)}°C`;
+      sex.style.color=c>=170?'#34D399':'#94A3B8';
+    }
     if(c>=180){b.className='pill bad';b.textContent=`🔥 Nozzle: ${c.toFixed(1)}°C${t?' / '+Math.round(t)+'°C':''} (HOT)`}
     else if(t>0){b.className='pill';b.textContent=`🔥 Heating Nozzle: ${c.toFixed(1)}°C → ${Math.round(t)}°C`}
     else{b.className='pill info';b.textContent=`● Nozzle: ${c.toFixed(1)}°C (Idle)`}});
@@ -186,11 +205,14 @@ function filamentDialog(mode,sp){
   const sensorName=Object.keys(MR.config).concat(MR.objects).find(k=>/^filament_(switch|motion)_sensor\s+/.test(k));
   const ld=mode==='load';
   const root=el(`<div></div>`);
-  root.innerHTML=`<div class="row" style="align-items:center"><div class="grow"><h3 style="margin:0">${ld?'Load':'Unload'} Filament — ${sp.name}</h3><div class="sub">Target: ${target}°C • ${sp.type}</div></div><span class="cmd">${ld?'LOAD_FILAMENT':'UNLOAD_FILAMENT'}</span></div>
+  root.innerHTML=`<div class="row" style="align-items:center"><div class="grow"><h3 style="margin:0">${ld?'Load':'Unload'} Filament — ${sp.name}</h3><div class="sub">Target: ${target}°C • ${sp.type}</div></div>
+   <span class="pill" id="fdlg-noz" style="font-size:12px;font-weight:800;padding:4px 10px;margin-right:8px">🔥 Nozzle: --.-°C / ${target}°C</span>
+   <span class="cmd">${ld?'LOAD_FILAMENT':'UNLOAD_FILAMENT'}</span></div>
    <div class="row" style="margin-top:8px;flex-wrap:wrap"><div class="grow" style="min-width:240px" id="fa"></div>
    <div class="box grow col" style="min-width:240px"><b id="fst" style="color:#F59E0B">STEP 1: HEATING NOZZLE</b><div class="box" id="fin">Nozzle is heating up to extrude temperature. Please wait...</div>
     <div class="row" style="justify-content:space-between"><b id="ftemp" style="color:#38BDF8"></b><span class="pill" id="fsens-pill">${sensorName?'SENSOR: CHECKING':'SENSOR: NONE'}</span></div><div class="bar"><i id="fbar"></i></div>
     <div class="h" style="color:#94A3B8;font-size:10px;font-weight:800">PROCEDURAL CHECKLIST</div><div id="fchk" class="col" style="gap:3px;font-size:11px"></div>
+    <div class="row" style="justify-content:space-between;align-items:center;margin-top:4px"><div class="h" style="color:#94A3B8;font-size:10px;font-weight:800;margin:0">MANUAL EXTRUDE / RETRACT</div><span id="fdlg-ext-noz" class="sub" style="font-size:10.5px;color:#38BDF8"></span></div>
     <div class="grid2"><button class="btn sm" data-e="10">⬇ Extrude +10mm</button><button class="btn sm" data-e="25">⬇ Extrude +25mm</button><button class="btn sm" data-e="-10">⬆ Retract -10mm</button><button class="btn sm" data-e="-25">⬆ Retract -25mm</button></div></div></div>
    <div class="row" style="margin-top:8px"><button class="btn danger" id="fcan">⛔ Cancel & Turn Off Heaters</button><span class="grow"></span><button class="btn" id="fact" disabled>Heating...</button></div>`;
   $('#fa',root).append(a.el);
@@ -236,6 +258,12 @@ function filamentDialog(mode,sp){
     }
 
     $('#ftemp',root).textContent=`Nozzle Temp: ${cur.toFixed(1)}°C / ${target}°C`;$('#fbar',root).style.width=Math.min(100,cur/target*100)+'%';
+    const fnb=$('#fdlg-noz',root);
+    if(fnb){
+      if(cur>=180){fnb.className='pill bad';fnb.textContent=`🔥 Nozzle: ${cur.toFixed(1)}°C (HOT)`}
+      else{fnb.className='pill';fnb.textContent=`🔥 Heating Nozzle: ${cur.toFixed(1)}°C → ${target}°C`}
+    }
+    const fen=$('#fdlg-ext-noz',root);if(fen)fen.textContent=`Nozzle: ${cur.toFixed(1)}°C`;
     a.set({temp:cur,target,sensor:detected,liveVel});
     const hot=cur>=target-4||cur>=185;
     if(!hot){a.set({stage:'heating'});$('#fchk',root).innerHTML=chk(0,steps);return}
