@@ -271,6 +271,15 @@ function bedMesh(){
 /* ---- Probe accuracy ---- */
 function probeAccuracy(){
   const bs=bedSize();const ch=Anim.chart({h:200,scatter:true,dec:4,minPad:.002,empty:'Samples will plot here in real time'});let N=10;
+  const pSec=['load_cell_probe','probe','bltouch','smart_effector','beacon'].find(k=>MR.config[k])||'load_cell_probe';
+  const pCfg=MR.config[pSec]||{};
+  const cfgPs=+(parseFloat(pCfg.speed)||8.0).toFixed(1);
+  const cfgLs=+(parseFloat(pCfg.lift_speed)||10.0).toFixed(1);
+  const cfgRd=+(parseFloat(pCfg.sample_retract_dist)||3.0).toFixed(1);
+  let ps=+(parseFloat(localStorage.getItem('probe_speed'))||cfgPs).toFixed(1);
+  let ls=+(parseFloat(localStorage.getItem('probe_lift_speed'))||cfgLs).toFixed(1);
+  let rd=+(parseFloat(localStorage.getItem('probe_retract_dist'))||cfgRd).toFixed(1);
+
   const n=el(`<div class="sub-web-grid">
     <div class="sub-web-left">
       <div id="aa"></div>
@@ -282,20 +291,84 @@ function probeAccuracy(){
         <div class="box"><div class="h">AVERAGE Z</div><div class="big" id="av" style="font-size:20px">--</div></div>
         <div class="box"><div class="h">STD DEV (σ)</div><div class="big" id="as" style="font-size:20px">--</div></div>
       </div>
+      <div class="box col">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div class="h" style="margin:0">PROBE SETTINGS (LIVE OVERRIDE)</div>
+          <button class="btn sm" id="areset" title="Reset to printer.cfg values">↺ Config</button>
+        </div>
+        <div class="grid3" style="margin-top:6px">
+          <label class="col" style="gap:4px;font-size:11px;color:#94A3B8;font-weight:700">PROBE SPEED (mm/s)
+            <input id="aps" type="number" min="1" max="25" step="0.5" value="${ps}" style="min-height:36px">
+          </label>
+          <label class="col" style="gap:4px;font-size:11px;color:#94A3B8;font-weight:700">LIFT SPEED (mm/s)
+            <input id="als" type="number" min="2" max="40" step="1" value="${ls}" style="min-height:36px">
+          </label>
+          <label class="col" style="gap:4px;font-size:11px;color:#94A3B8;font-weight:700">RETRACT HEIGHT (mm)
+            <input id="ard" type="number" min="0.5" max="15" step="0.5" value="${rd}" style="min-height:36px">
+          </label>
+        </div>
+      </div>
       <div class="box col"><div class="h">SAMPLES COUNT</div>
         <div class="row"><select id="an" class="grow" style="min-height:42px">${[5,10,20,30].map(v=>`<option ${v===10?'selected':''}>${v} Samples</option>`).join('')}</select>
         <button class="btn pri grow" id="arun" style="min-height:42px;font-weight:800">▶ Run PROBE_ACCURACY</button></div>
+        <button class="btn sm" id="asavecfg" style="margin-top:6px;align-self:flex-end">💾 Save Speeds/Height to printer.cfg</button>
       </div>
     </div>
   </div>`);
   $('#aa',n).append(ch.el);openSub('Probe Accuracy',n);
+  const syncInputs=()=>{
+    ps=Math.max(0.5,Math.min(25,parseFloat($('#aps',n).value)||cfgPs));
+    ls=Math.max(1,Math.min(40,parseFloat($('#als',n).value)||cfgLs));
+    rd=Math.max(0.5,Math.min(15,parseFloat($('#ard',n).value)||cfgRd));
+    localStorage.setItem('probe_speed',ps);
+    localStorage.setItem('probe_lift_speed',ls);
+    localStorage.setItem('probe_retract_dist',rd);
+  };
+  ['#aps','#als','#ard'].forEach(id=>$(id,n).onchange=syncInputs);
+  $('#areset',n).onclick=()=>{
+    ps=cfgPs;ls=cfgLs;rd=cfgRd;
+    $('#aps',n).value=ps;$('#als',n).value=ls;$('#ard',n).value=rd;
+    syncInputs();toast('Reset to printer.cfg defaults');
+  };
   $('#an',n).onchange=()=>{N=parseInt($('#an',n).value)};
+  $('#asavecfg',n).onclick=async()=>{
+    syncInputs();
+    const btn=$('#asavecfg',n);btn.disabled=true;btn.textContent='Saving…';
+    try{
+      let txt=await MR.readConfig();
+      if(!txt)throw new Error('Could not read printer.cfg');
+      const secRe=new RegExp(`(\\[${pSec}\\][\\s\\S]*?)(?=\\n\\[|$)`,'i');
+      const m=txt.match(secRe);
+      if(!m)throw new Error(`[${pSec}] not found in printer.cfg`);
+      let block=m[1];
+      const setKey=(b,k,v)=>{
+        const re=new RegExp(`^([ \\t]*${k}[ \\t]*:)[ \\t]*[^\\r\\n#]*`,'im');
+        return re.test(b)?b.replace(re,`$1 ${v}`):b.trimEnd()+`\n${k}: ${v}`;
+      };
+      block=setKey(block,'speed',ps.toFixed(1));
+      block=setKey(block,'lift_speed',ls.toFixed(1));
+      block=setKey(block,'sample_retract_dist',rd.toFixed(1));
+      txt=txt.replace(secRe,block);
+      const fd=new FormData();
+      fd.append('file',new Blob([txt],{type:'text/plain'}),'printer.cfg');
+      fd.append('root','config');
+      const r=await fetch(`${MR.base}/server/files/upload`,{method:'POST',body:fd});
+      if(!r.ok)throw new Error(`Upload HTTP ${r.status}`);
+      await MR.gcode('FIRMWARE_RESTART');
+      toast('✓ Probe settings saved & Klipper restarting');
+    }catch(e){
+      toast('⚠ Save failed: '+(e.message||e));
+    }finally{
+      btn.disabled=false;btn.textContent='💾 Save Speeds/Height to printer.cfg';
+    }
+  };
   $('#arun',n).onclick=async()=>{
-    const b=$('#arun',n);b.disabled=true;$('#amsg',n).textContent=`Probing bed center (${N} samples)…`;await ensureHomed();
+    syncInputs();
+    const b=$('#arun',n);b.disabled=true;$('#amsg',n).textContent=`Probing bed center (${N} samples @ ${ps}mm/s, retract ${rd}mm)…`;await ensureHomed();
     const cap=gcodeCapture();
     const po=probeOff();const iv=setInterval(()=>{const zs=cap.lines.map(l=>(l.match(PROBE_RESULT_RE)||[])[1]).filter(Boolean).map(Number);ch.set({pts:zs})},500);
     const tare=MR.tareGcode();
-    const ok=await MR.gcode(`G90\nG1 Z10 F600\nG1 X${(bs.x/2-po.x).toFixed(1)} Y${(bs.y/2-po.y).toFixed(1)} F6000\n${tare}PROBE_ACCURACY SAMPLES=${N}`,600000);
+    const ok=await MR.gcode(`G90\nG1 Z10 F600\nG1 X${(bs.x/2-po.x).toFixed(1)} Y${(bs.y/2-po.y).toFixed(1)} F6000\n${tare}PROBE_ACCURACY SAMPLES=${N} PROBE_SPEED=${ps.toFixed(1)} LIFT_SPEED=${ls.toFixed(1)} SAMPLE_RETRACT_DIST=${rd.toFixed(1)}`,600000);
     clearInterval(iv);cap.stop();b.disabled=false;
     const all=cap.lines.join('\n');
     const m=all.match(/range\s+([\d.]+).*average\s+([\d.]+).*deviation\s+([\d.]+)/i);
