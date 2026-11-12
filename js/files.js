@@ -1101,14 +1101,21 @@ App.pages.printing=(()=>{
           <button class="card-collapse-btn" title="Collapse / Expand card">▼</button>
         </div>
         <div class="card-content">
-          <div class="row" style="align-items:baseline">
-            <span class="big" id="pz">+0.000 mm</span>
-            <span class="sub grow" id="pbs">Baby steps added: 0</span>
+          <div class="row" style="align-items:baseline;justify-content:space-between">
+            <div>
+              <div class="sub" style="font-size:11px;color:#94A3B8;font-weight:700">NEW PROBE Z</div>
+              <span class="big" id="pnewpz" style="color:#00E5FF">--</span>
+            </div>
+            <div style="text-align:right">
+              <div class="sub" style="font-size:11px;color:#94A3B8;font-weight:700">BABYSTEP DELTA</div>
+              <span class="mono" id="pz" style="font-weight:800;color:#34D399;font-size:14px">+0.000 mm</span>
+              <div class="sub" id="pbs" style="font-size:11px">Baby steps added: 0</div>
+            </div>
           </div>
           <div class="grid4" style="margin-top:8px">
             <button class="btn xl" data-z="-0.05">-0.05</button>
-            <button class="btn xl" data-z="-0.01">-0.01</button>
-            <button class="btn xl" data-z="0.01">+0.01</button>
+            <button class="btn xl" data-z="-0.025">-0.025</button>
+            <button class="btn xl" data-z="0.025">+0.025</button>
             <button class="btn xl" data-z="0.05">+0.05</button>
           </div>
         </div>
@@ -1950,8 +1957,22 @@ App.pages.printing=(()=>{
     App._camStart = start;
   })();
   const dur=s=>{s=Math.max(0,Math.round(s));return`${Math.floor(s/3600)}h ${String(Math.floor(s%3600/60)).padStart(2,'0')}m`};
+  const getBaseProbeZ = () => {
+    const s = stat();
+    const cf = s.configfile?.settings || {};
+    for (const k of ['load_cell_probe', 'probe', 'bltouch', 'smart_effector', 'beacon']) {
+      if (cf[k] && cf[k].z_offset !== undefined) return Number(cf[k].z_offset) || 0;
+    }
+    return 0;
+  };
   root.querySelectorAll('[data-z]').forEach(b=>b.onclick=()=>{MR.babystep(+b.dataset.z);babysteps++;z0+=+b.dataset.z;printBabystep=z0;upd()});
-  const upd=()=>{$('#pz').textContent=(z0>=0?'+':'')+z0.toFixed(3)+' mm';$('#pbs').textContent='Baby steps added: '+babysteps};
+  const upd=()=>{
+    const baseZ = getBaseProbeZ();
+    const newProbeZ = baseZ - z0;
+    if ($('#pz')) $('#pz').textContent=(z0>=0?'+':'')+z0.toFixed(3)+' mm';
+    if ($('#pbs')) $('#pbs').textContent='Baby steps added: '+babysteps;
+    if ($('#pnewpz')) $('#pnewpz').textContent=(newProbeZ>=0?'+':'')+newProbeZ.toFixed(3)+' mm';
+  };
   $('#ppause').onclick=()=>{const st=stat().print_stats?.state;st==='paused'?MR.resume():MR.pause()};
   $('#pexclude').onclick=excludeObjectModal;
   $('#pcancel').onclick=()=>confirmBox('Cancel print?','This will stop the print and turn off the heaters.','Cancel Print',()=>MR.cancel(),true);
@@ -2089,12 +2110,12 @@ App.pages.printing=(()=>{
 function fineTune(){
   const s=stat(),gm=s.gcode_move||{};
   let sp=Math.round((gm.speed_factor||1)*100),fl=Math.round((gm.extrude_factor||1)*100),fn=Math.round((s.fan?.speed||0)*100),zo=gm.homing_origin?gm.homing_origin[2]:0;
-  const zs=[.005,.01,.025,.05],ps=[1,5,10,25];let si=1;
+  const zs=[.01,.025,.05,.1],ps=[5,10,25,50];let si=1;
   const n=el(`<div class="dlg" style="max-width:680px;border:2px solid #00E5FF"><div class="row" style="align-items:center"><div style="width:24px">${ICON('tune')}</div><div class="grow"><b style="color:#00E5FF;font-size:14px;letter-spacing:.6px">FINE TUNE PRINT</b><div class="sub">Select Step Size • Tap readout to reset</div></div><button class="x" id="fx">✕</button></div>
    <div class="row box" style="margin:8px 0;align-items:center" id="fsteps"><b style="color:#00E5FF">STEP:</b></div><div class="row" id="fcols"></div>
    <button class="btn pri" style="width:100%;margin-top:10px" id="fdone">DONE / RETURN TO PRINT</button></div>`);
   const close=modal(n);
-  ['0.005 mm / 1%','0.01 mm / 5%','0.025 mm / 10%','0.05 mm / 25%'].forEach((t,i)=>{const b=el(`<button class="btn sm grow ${i===si?'on':''}">${t}</button>`);b.onclick=()=>{si=i;$('#fsteps',n).querySelectorAll('.btn').forEach((x,k)=>x.classList.toggle('on',k===i));cols.forEach(c=>c.lbl())};$('#fsteps',n).append(b)});
+  ['0.01 mm / 5%','0.025 mm / 10%','0.05 mm / 25%','0.10 mm / 50%'].forEach((t,i)=>{const b=el(`<button class="btn sm grow ${i===si?'on':''}">${t}</button>`);b.onclick=()=>{si=i;$('#fsteps',n).querySelectorAll('.btn').forEach((x,k)=>x.classList.toggle('on',k===i));cols.forEach(c=>c.lbl())};$('#fsteps',n).append(b)});
   const cols=[];
   const col=(title,color,get,fmtv,stepTxt,up,down,reset)=>{
     const d=el(`<div class="box grow col" style="align-items:stretch;text-align:center"><b style="color:${color}">${title}</b><div class="sub st"></div><button class="btn" style="color:${color}">▲</button><div class="mono v" style="cursor:pointer;border:1.5px solid ${color};border-radius:6px;padding:8px;font-weight:900;background:rgba(0,0,0,.4)"></div><button class="btn">▼</button></div>`);
