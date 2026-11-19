@@ -189,12 +189,7 @@ App.pages.files=(()=>{
       addSep();
       addItem('🗑️ Delete Folder',()=>confirmDeleteFolder(it,full),true);
     }else{
-      addItem('🚀 Start Print',()=>{
-        confirmBox('Start Print?',`Begin printing "${it.name}" immediately?`,'Start Print',async()=>{
-          toast('Starting print…');
-          try{await MR.startPrint(full);go('printing');}catch(err){toast('⚠ Start failed: '+err.message);}
-        });
-      });
+      addItem('🚀 Start Print',()=>promptStartPrint(full,it));
       addItem('📥 Load for Print',()=>loadFileForPrint(full,it));
       addItem('ℹ️ File Details',()=>showDetails(full,it));
       addSep();
@@ -408,10 +403,7 @@ App.pages.files=(()=>{
     $('.fc-load',card).onclick=e=>{e.stopPropagation();loadFileForPrint(full,it);};
     $('.fc-print',card).onclick=e=>{
       e.stopPropagation();
-      confirmBox('Start Print?',`Begin printing "${it.name}" immediately?`,'Start Print',async()=>{
-        toast('Starting print…');
-        try{await MR.startPrint(full);go('printing');}catch(err){toast('⚠ Start failed: '+err.message);}
-      });
+      promptStartPrint(full,it);
     };
     card.onclick=()=>showDetails(full,it);
     card.oncontextmenu=e=>openContextMenu(e,it,full);
@@ -490,10 +482,7 @@ App.pages.files=(()=>{
     $('.r-load',row).onclick=e=>{e.stopPropagation();loadFileForPrint(full,it);};
     $('.r-print',row).onclick=e=>{
       e.stopPropagation();
-      confirmBox('Start Print?',`Begin printing "${it.name}" immediately?`,'Start Print',async()=>{
-        toast('Starting print…');
-        try{await MR.startPrint(full);go('printing');}catch(err){toast('⚠ Start failed: '+err.message);}
-      });
+      promptStartPrint(full,it);
     };
     row.onclick=()=>showDetails(full,it);
     row.oncontextmenu=e=>openContextMenu(e,it,full);
@@ -648,17 +637,401 @@ App.pages.files=(()=>{
       toast(`💾 Downloading ${it.name}…`);
     };
     $('#dload',n).onclick=()=>{close();loadFileForPrint(full,it);};
-    $('#ds',n).onclick=async()=>{
+    $('#ds',n).onclick=()=>{
       close();
-      toast('Starting print…');
-      try{
-        await MR.startPrint(full);
-        go('printing');
-      }catch(e){
-        toast('⚠ Start print failed: '+e.message);
-      }
+      promptStartPrint(full,it);
     };
   }
+
+  function scanGcodeTemps(text){
+    const lines=text.split(/\r?\n/);
+    const nozzleEvents=[];
+    const bedEvents=[];
+    let layerChanges=0;
+    let inOtherLayers=false;
+
+    for(let i=0;i<lines.length;i++){
+      const raw=lines[i];
+      const trimmed=raw.trim();
+      if(!trimmed)continue;
+
+      if(/^;\s*LAYER_CHANGE\b/i.test(trimmed)){
+        layerChanges++;
+        if(layerChanges>=2)inOtherLayers=true;
+        continue;
+      }
+      const curaLayer=trimmed.match(/^;\s*LAYER:(\d+)/i);
+      if(curaLayer){
+        if(parseInt(curaLayer[1],10)>=1)inOtherLayers=true;
+        continue;
+      }
+      if(trimmed.startsWith(';'))continue;
+
+      const semi=trimmed.indexOf(';');
+      const code=(semi>=0?trimmed.slice(0,semi):trimmed).trim();
+      if(!code)continue;
+
+      const curLayerCmd=code.match(/SET_PRINT_STATS_INFO\b.*CURRENT_LAYER=(\d+)/i);
+      if(curLayerCmd&&parseInt(curLayerCmd[1],10)>=2){
+        inOtherLayers=true;
+      }
+
+      if(/^(PRINT_START|START_PRINT)\b/i.test(code)){
+        const em=code.match(/\b(?:EXTRUDER_TEMP|EXTRUDER|NOZZLE_TEMP|HOTEND_TEMP|FIRST_LAYER_EXTR_TEMP|TEMP_EXTRUDER)\s*=\s*(\d+(?:\.\d+)?)/i);
+        const bm=code.match(/\b(?:BED_TEMP|BED|FIRST_LAYER_BED_TEMP|TEMP_BED)\s*=\s*(\d+(?:\.\d+)?)/i);
+        if(em){const v=Math.round(parseFloat(em[1]));if(v>0)nozzleEvents.push({v,other:false,line:i+1});}
+        if(bm){const v=Math.round(parseFloat(bm[1]));if(v>0)bedEvents.push({v,other:false,line:i+1});}
+        continue;
+      }
+
+      const nm=code.match(/^(M104|M109)\b.*\bS(\d+(?:\.\d+)?)/i);
+      if(nm){
+        const v=Math.round(parseFloat(nm[2]));
+        if(v>0)nozzleEvents.push({v,other:inOtherLayers,line:i+1});
+        continue;
+      }
+      const bm=code.match(/^(M140|M190)\b.*\bS(\d+(?:\.\d+)?)/i);
+      if(bm){
+        const v=Math.round(parseFloat(bm[2]));
+        if(v>0)bedEvents.push({v,other:inOtherLayers,line:i+1});
+      }
+    }
+
+    const hasHighNozzle=nozzleEvents.some(e=>e.v>160);
+    const realNozzle=hasHighNozzle?nozzleEvents.filter(e=>e.other||e.v>160):nozzleEvents;
+
+    const firstNozEv=realNozzle.find(e=>!e.other)||realNozzle[0];
+    const otherNozEv=[...realNozzle].reverse().find(e=>e.other)||[...realNozzle].reverse()[0];
+    const firstBedEv=bedEvents.find(e=>!e.other)||bedEvents[0];
+    const otherBedEv=[...bedEvents].reverse().find(e=>e.other)||[...bedEvents].reverse()[0];
+
+    const firstNozzle=firstNozEv?firstNozEv.v:null;
+    const otherNozzle=otherNozEv?otherNozEv.v:firstNozzle;
+    const firstBed=firstBedEv?firstBedEv.v:null;
+    const otherBed=otherBedEv?otherBedEv.v:firstBed;
+
+    const uniqueNozzles=[...new Set(realNozzle.map(e=>e.v))];
+    const uniqueBeds=[...new Set(bedEvents.map(e=>e.v))];
+    const hasMidPrintChange=(uniqueNozzles.length>1)||(uniqueBeds.length>1);
+
+    return {
+      firstNozzle,otherNozzle,firstBed,otherBed,
+      uniqueNozzles,uniqueBeds,hasMidPrintChange,hasHighNozzle
+    };
+  }
+
+  function rewriteGcodeTemps(text,opts){
+    const {firstNozzle,otherNozzle,firstBed,otherBed,hasHighNozzle}=opts;
+    const nl=text.includes('\r\n')?'\r\n':'\n';
+    const lines=text.split(/\r?\n/);
+    let layerChanges=0;
+    let inOtherLayers=false;
+    let changedCount=0;
+
+    for(let i=0;i<lines.length;i++){
+      const raw=lines[i];
+      const trimmed=raw.trim();
+      if(!trimmed)continue;
+
+      if(/^;\s*LAYER_CHANGE\b/i.test(trimmed)){
+        layerChanges++;
+        if(layerChanges>=2)inOtherLayers=true;
+        continue;
+      }
+      const curaLayer=trimmed.match(/^;\s*LAYER:(\d+)/i);
+      if(curaLayer){
+        if(parseInt(curaLayer[1],10)>=1)inOtherLayers=true;
+        continue;
+      }
+      if(trimmed.startsWith(';'))continue;
+
+      const semi=raw.indexOf(';');
+      let code=semi>=0?raw.slice(0,semi):raw;
+      const comment=semi>=0?raw.slice(semi):'';
+
+      const curLayerCmd=code.match(/SET_PRINT_STATS_INFO\b.*CURRENT_LAYER=(\d+)/i);
+      if(curLayerCmd&&parseInt(curLayerCmd[1],10)>=2){
+        inOtherLayers=true;
+      }
+
+      let updated=code;
+
+      if(/^\s*(PRINT_START|START_PRINT)\b/i.test(code)){
+        if(firstNozzle!==null){
+          updated=updated.replace(/\b(EXTRUDER_TEMP|EXTRUDER|NOZZLE_TEMP|HOTEND_TEMP|FIRST_LAYER_EXTR_TEMP|TEMP_EXTRUDER)(\s*=\s*)(\d+(?:\.\d+)?)/gi,(_,k,eq)=>{changedCount++;return k+eq+firstNozzle;});
+        }
+        if(firstBed!==null){
+          updated=updated.replace(/\b(BED_TEMP|BED|FIRST_LAYER_BED_TEMP|TEMP_BED)(\s*=\s*)(\d+(?:\.\d+)?)/gi,(_,k,eq)=>{changedCount++;return k+eq+firstBed;});
+        }
+      }else if(/^\s*(M104|M109)\b/i.test(code)&&firstNozzle!==null){
+        const sm=code.match(/\bS(\d+(?:\.\d+)?)/i);
+        if(sm){
+          const oldVal=parseFloat(sm[1]);
+          const isProbePreheat=!inOtherLayers&&hasHighNozzle&&oldVal>0&&oldVal<=160;
+          if(oldVal>0&&!isProbePreheat){
+            const target=inOtherLayers&&otherNozzle!==null?otherNozzle:firstNozzle;
+            updated=code.replace(/\bS(\d+(?:\.\d+)?)/i,'S'+target);
+            changedCount++;
+          }
+        }
+      }else if(/^\s*(M140|M190)\b/i.test(code)&&firstBed!==null){
+        const sm=code.match(/\bS(\d+(?:\.\d+)?)/i);
+        if(sm){
+          const oldVal=parseFloat(sm[1]);
+          if(oldVal>0){
+            const target=inOtherLayers&&otherBed!==null?otherBed:firstBed;
+            updated=code.replace(/\bS(\d+(?:\.\d+)?)/i,'S'+target);
+            changedCount++;
+          }
+        }
+      }
+
+      if(updated!==code){
+        lines[i]=updated+comment;
+      }
+    }
+    return {text:lines.join(nl),changedCount};
+  }
+
+  async function promptStartPrint(full,it){
+    const name=it?.name||full.split('/').pop();
+    const isGcode=/\.(gcode|gco|g)$/i.test(name);
+    const sp=App.getActiveSpool?.();
+
+    let rawGcode=null;
+    let scanned=null;
+
+    const n=el(`<div class="dlg" style="max-width:540px;border:1.5px solid rgba(0,229,255,.45)">
+      <div class="row" style="align-items:center;margin-bottom:8px">
+        <div style="width:28px;color:#00E5FF">${ICON('print',24)}</div>
+        <div class="grow" style="min-width:0">
+          <h3 style="margin:0;font-size:16px">Start Print — Temperature Check</h3>
+          <div class="sub fn" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${full}">${name}</div>
+        </div>
+        <button class="x" id="sp-x">✕</button>
+      </div>
+
+      <div id="sp-scan-box" class="box" style="margin:8px 0;padding:12px;text-align:center;color:var(--muted);font-size:12.5px">
+        🔍 Scanning G-code temperatures…
+      </div>
+
+      <div id="sp-body" style="display:none">
+        <div id="sp-warn" style="display:none;margin:8px 0;padding:9px 12px;border-radius:10px;background:rgba(245,158,11,.13);border:1.5px solid rgba(251,191,36,.5);color:#FDE68A;font-size:12px;line-height:1.45"></div>
+
+        <div class="box" style="margin:8px 0;padding:10px 12px;background:rgba(15,23,42,.7)">
+          <div style="font-size:11px;font-weight:800;letter-spacing:.6px;color:var(--muted);margin-bottom:8px">QUICK FILAMENT PRESETS</div>
+          <div class="row" id="sp-presets" style="gap:6px;flex-wrap:wrap"></div>
+        </div>
+
+        <div class="box" style="margin:8px 0;padding:12px;display:flex;flex-direction:column;gap:10px">
+          <div class="row" style="align-items:center;justify-content:space-between">
+            <span style="font-size:11.5px;font-weight:800;letter-spacing:.5px;color:#CBD5E1">TEMPERATURES (°C)</span>
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#94A3B8;cursor:pointer;user-select:none">
+              <input type="checkbox" id="sp-lock" checked> Keep all layers same
+            </label>
+          </div>
+
+          <div style="display:grid;grid-template-columns:110px 1fr 1fr;gap:8px;align-items:center">
+            <span style="font-size:11px;color:var(--muted);font-weight:700">HEATER</span>
+            <span style="font-size:11px;color:var(--muted);font-weight:700">1ST LAYER</span>
+            <span style="font-size:11px;color:var(--muted);font-weight:700">OTHER LAYERS</span>
+
+            <span style="font-weight:800;color:#FF7A00">🔥 Nozzle</span>
+            <input type="number" id="sp-n1" min="0" max="320" step="1" style="padding:7px 9px;border-radius:8px;font-weight:800;color:#FF9E44">
+            <input type="number" id="sp-n2" min="0" max="320" step="1" style="padding:7px 9px;border-radius:8px;font-weight:800;color:#FF9E44">
+
+            <span style="font-weight:800;color:#00E5FF">🛏 Bed</span>
+            <input type="number" id="sp-b1" min="0" max="130" step="1" style="padding:7px 9px;border-radius:8px;font-weight:800;color:#67E8F9">
+            <input type="number" id="sp-b2" min="0" max="130" step="1" style="padding:7px 9px;border-radius:8px;font-weight:800;color:#67E8F9">
+          </div>
+          <div id="sp-detected-sub" class="sub" style="font-size:11.5px"></div>
+        </div>
+
+        <div id="sp-save-opts" class="box" style="display:none;margin:8px 0;padding:9px 12px;background:rgba(0,229,255,.07);border-color:rgba(0,229,255,.35)">
+          <div style="font-size:12px;font-weight:800;color:#67E8F9;margin-bottom:6px">✏️ Temperatures modified — how to save?</div>
+          <div class="row" style="gap:14px;flex-wrap:wrap;font-size:12px">
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="radio" name="sp-mode" value="copy" checked> Save tweaked copy (keep original)
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="radio" name="sp-mode" value="overwrite"> Overwrite original file
+            </label>
+          </div>
+          <div id="sp-copy-preview" class="mono sub" style="font-size:11px;margin-top:5px;color:#94A3B8"></div>
+        </div>
+      </div>
+
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="btn" id="sp-cancel">Cancel</button>
+        <button class="btn pri" id="sp-go" style="font-weight:900;padding:8px 18px">🚀 Start Print</button>
+      </div>
+    </div>`);
+
+    const close=modal(n);
+    $('#sp-x',n).onclick=$('#sp-cancel',n).onclick=close;
+
+    const inpN1=$('#sp-n1',n),inpN2=$('#sp-n2',n),inpB1=$('#sp-b1',n),inpB2=$('#sp-b2',n);
+    const lockCb=$('#sp-lock',n);
+    const saveOpts=$('#sp-save-opts',n);
+    const goBtn=$('#sp-go',n);
+    const copyPreview=$('#sp-copy-preview',n);
+
+    const orig={n1:null,n2:null,b1:null,b2:null};
+
+    const isModified=()=>{
+      if(!rawGcode)return false;
+      const vN1=inpN1.value===''?null:Math.round(Number(inpN1.value));
+      const vN2=inpN2.value===''?null:Math.round(Number(inpN2.value));
+      const vB1=inpB1.value===''?null:Math.round(Number(inpB1.value));
+      const vB2=inpB2.value===''?null:Math.round(Number(inpB2.value));
+      return vN1!==orig.n1||vN2!==orig.n2||vB1!==orig.b1||vB2!==orig.b2;
+    };
+
+    const getTweakedName=()=>{
+      const stem=name.replace(/\.(gcode|gco|g)$/i,'').replace(/_\d+N_\d+B$/i,'');
+      const ext=(name.match(/\.(gcode|gco|g)$/i)||['.gcode'])[0];
+      const nv=inpN1.value||orig.n1||0;
+      const bv=inpB1.value||orig.b1||0;
+      return `${stem}_${nv}N_${bv}B${ext}`;
+    };
+
+    const updateUI=()=>{
+      inpN2.disabled=lockCb.checked;
+      inpB2.disabled=lockCb.checked;
+      if(lockCb.checked){
+        inpN2.value=inpN1.value;
+        inpB2.value=inpB1.value;
+      }
+      const mod=isModified();
+      saveOpts.style.display=mod?'block':'none';
+      if(mod){
+        const mode=n.querySelector('input[name="sp-mode"]:checked')?.value||'copy';
+        copyPreview.textContent=mode==='copy'?`Will save & print: ${getTweakedName()}`:`Will overwrite & print: ${name}`;
+        goBtn.textContent='✨ Apply Temps & Print';
+      }else{
+        goBtn.textContent='🚀 Print As-Is';
+      }
+    };
+
+    lockCb.onchange=updateUI;
+    [inpN1,inpN2,inpB1,inpB2].forEach(el=>el.oninput=updateUI);
+    n.querySelectorAll('input[name="sp-mode"]').forEach(r=>r.onchange=updateUI);
+
+    // Build presets
+    const presetsBox=$('#sp-presets',n);
+    const presets=[];
+    if(sp){
+      presets.push({label:`🧵 ${sp.name} (${sp.nozzle||205}°/${sp.bed??60}°)`,n:sp.nozzle||205,b:sp.bed??60,hi:true});
+    }
+    presets.push(
+      {label:'PLA 205/60',n:205,b:60},
+      {label:'PETG 240/70',n:240,b:70},
+      {label:'ABS 250/100',n:250,b:100},
+      {label:'TPU 220/50',n:220,b:50}
+    );
+    presets.forEach(p=>{
+      const b=el(`<button class="btn sm" style="${p.hi?'border-color:rgba(0,229,255,.5);color:#67E8F9;font-weight:800':''}">${p.label}</button>`);
+      b.onclick=()=>{
+        inpN1.value=p.n;inpN2.value=p.n;
+        inpB1.value=p.b;inpB2.value=p.b;
+        lockCb.checked=true;
+        updateUI();
+      };
+      presetsBox.append(b);
+    });
+    const resetBtn=el(`<button class="btn sm" title="Restore original G-code temperatures">↺ Original</button>`);
+    resetBtn.onclick=()=>{
+      inpN1.value=orig.n1??'';inpN2.value=orig.n2??'';
+      inpB1.value=orig.b1??'';inpB2.value=orig.b2??'';
+      lockCb.checked=(orig.n1===orig.n2&&orig.b1===orig.b2);
+      updateUI();
+    };
+    presetsBox.append(resetBtn);
+
+    goBtn.onclick=async()=>{
+      goBtn.disabled=true;
+      const mod=isModified();
+      try{
+        if(!mod){
+          close();
+          toast('Starting print…');
+          await MR.startPrint(full);
+          go('printing');
+          return;
+        }
+        const vN1=inpN1.value===''?null:Math.round(Number(inpN1.value));
+        const vN2=inpN2.value===''?null:Math.round(Number(inpN2.value));
+        const vB1=inpB1.value===''?null:Math.round(Number(inpB1.value));
+        const vB2=inpB2.value===''?null:Math.round(Number(inpB2.value));
+        goBtn.textContent='⏳ Applying & uploading…';
+        const res=rewriteGcodeTemps(rawGcode,{
+          firstNozzle:vN1,otherNozzle:vN2,firstBed:vB1,otherBed:vB2,
+          hasHighNozzle:scanned?.hasHighNozzle
+        });
+        const mode=n.querySelector('input[name="sp-mode"]:checked')?.value||'copy';
+        const targetName=mode==='overwrite'?name:getTweakedName();
+        const dirPath=full.includes('/')?full.slice(0,full.lastIndexOf('/')):'';
+        const fileObj=new File([res.text],targetName,{type:'text/plain'});
+        await MR.uploadFile(fileObj,dirPath,true);
+        close();
+        toast(`🚀 Printing ${targetName} (${vN1}°/${vB1}°)`);
+        load();
+        go('printing');
+      }catch(err){
+        goBtn.disabled=false;
+        updateUI();
+        toast('⚠ Start failed: '+(err.message||'Server error'));
+      }
+    };
+
+    // Fetch & scan G-code
+    try{
+      if(!isGcode){
+        $('#sp-scan-box',n).innerHTML='ℹ Temperature editing is supported for <code>.gcode</code> files. Click <b>Print As-Is</b> to start.';
+        goBtn.textContent='🚀 Print As-Is';
+        return;
+      }
+      const url=(MR.base||'')+'/server/files/gcodes/'+full.split('/').map(encodeURIComponent).join('/');
+      const r=await fetch(url,{cache:'no-store'});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      rawGcode=await r.text();
+      scanned=scanGcodeTemps(rawGcode);
+
+      // Fallback to Moonraker metadata if a heater wasn't found explicitly
+      const m=metaCache[full]||(await MR.meta(full))||{};
+      orig.n1=scanned.firstNozzle??(m.first_layer_extr_temp?Math.round(m.first_layer_extr_temp):null);
+      orig.n2=scanned.otherNozzle??orig.n1;
+      orig.b1=scanned.firstBed??(m.first_layer_bed_temp?Math.round(m.first_layer_bed_temp):null);
+      orig.b2=scanned.otherBed??orig.b1;
+
+      inpN1.value=orig.n1??'';
+      inpN2.value=orig.n2??'';
+      inpB1.value=orig.b1??'';
+      inpB2.value=orig.b2??'';
+      lockCb.checked=(orig.n1===orig.n2&&orig.b1===orig.b2);
+
+      const detParts=[];
+      detParts.push(`Nozzle: ${scanned.uniqueNozzles.length?scanned.uniqueNozzles.map(v=>v+'°C').join(' → '):(orig.n1!=null?orig.n1+'°C':'none')}`);
+      detParts.push(`Bed: ${scanned.uniqueBeds.length?scanned.uniqueBeds.map(v=>v+'°C').join(' → '):(orig.b1!=null?orig.b1+'°C':'none')}`);
+      $('#sp-detected-sub',n).textContent='Detected in G-code — '+detParts.join('  •  ');
+
+      if(scanned.hasMidPrintChange){
+        const w=$('#sp-warn',n);
+        w.style.display='block';
+        w.innerHTML=`<b>⚠ Mid-print temperature change detected in G-code:</b><br>`+
+          (scanned.uniqueNozzles.length>1?`• Nozzle changes: <b>${scanned.uniqueNozzles.map(v=>v+'°C').join(' → ')}</b><br>`:'')+
+          (scanned.uniqueBeds.length>1?`• Bed changes: <b>${scanned.uniqueBeds.map(v=>v+'°C').join(' → ')}</b>`:'');
+      }
+
+      $('#sp-scan-box',n).style.display='none';
+      $('#sp-body',n).style.display='block';
+      updateUI();
+    }catch(err){
+      $('#sp-scan-box',n).innerHTML=`⚠ Could not scan G-code (${err.message}). You can still print as-is.`;
+      goBtn.textContent='🚀 Print As-Is';
+    }
+  }
+  App.promptStartPrint=promptStartPrint;
 
   async function loadFileForPrint(full,it){
     const name=it?.name||full.split('/').pop();
@@ -1866,14 +2239,7 @@ App.pages.printing=(()=>{
   if (btnStartLoaded) {
     btnStartLoaded.onclick = () => {
       if (!App.loadedFile) return;
-      confirmBox('Start Print?', `Begin printing "${App.loadedFile.name}" now?`, 'Start Print', async () => {
-        toast('Starting print…');
-        try {
-          await MR.startPrint(App.loadedFile.filename);
-        } catch(e) {
-          toast('⚠ Start failed: ' + e.message);
-        }
-      });
+      App.promptStartPrint(App.loadedFile.filename, { name: App.loadedFile.name });
     };
   }
   const pstartLoaded = $('#pstart-loaded', root);
