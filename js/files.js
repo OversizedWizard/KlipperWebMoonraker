@@ -93,12 +93,145 @@ App.pages.files=(()=>{
     {name:'50mmflatsquare_PLA_cOLDbED.gcode',dir:0,size:1250000,mod:Date.now()/1000-43200,time:540,fil:1.8,slicer:'PrusaSlicer'}
   ];
 
+  let draggedItem=null;
+  let activeCtxMenu=null;
+  function closeContextMenu(){
+    if(activeCtxMenu){activeCtxMenu.remove();activeCtxMenu=null;}
+  }
+  document.addEventListener('click',closeContextMenu);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeContextMenu();});
+  window.addEventListener('scroll',closeContextMenu,true);
+
+  async function moveItemToDir(item,destDir){
+    if(!item||!item.full)return;
+    const curParent=item.full.includes('/')?item.full.slice(0,item.full.lastIndexOf('/')):'';
+    const cleanDest=String(destDir||'').replace(/^\/+|\/+$/g,'');
+    if(cleanDest===curParent){return;}
+    if(item.dir&&(cleanDest===item.full||cleanDest.startsWith(item.full+'/'))){
+      toast('⚠ Cannot move a folder into itself');
+      return;
+    }
+    const newFull=(cleanDest?cleanDest+'/':'')+item.name;
+    try{
+      await MR.moveItem(item.full,newFull);
+      if(metaCache[item.full]){metaCache[newFull]=metaCache[item.full];delete metaCache[item.full];}
+      toast(`✓ Moved "${item.name}" to /${cleanDest}`);
+      load();
+    }catch(err){
+      toast('⚠ Move failed: '+(err.message||'Server error'));
+    }
+  }
+
+  function attachDragSource(node,it,full){
+    node.draggable=true;
+    node.addEventListener('dragstart',e=>{
+      closeContextMenu();
+      draggedItem={full,name:it.name,dir:!!it.dir};
+      e.dataTransfer.effectAllowed='move';
+      try{e.dataTransfer.setData('application/x-klipper-item',JSON.stringify(draggedItem));}catch(_){}
+      node.classList.add('is-dragging');
+    });
+    node.addEventListener('dragend',()=>{
+      draggedItem=null;
+      node.classList.remove('is-dragging');
+      document.querySelectorAll('.drop-target').forEach(el=>el.classList.remove('drop-target'));
+    });
+  }
+
+  function attachDropTarget(node,targetDirPath){
+    const cleanTarget=String(targetDirPath||'').replace(/^\/+|\/+$/g,'');
+    const canDrop=()=>{
+      if(!draggedItem)return false;
+      const curParent=draggedItem.full.includes('/')?draggedItem.full.slice(0,draggedItem.full.lastIndexOf('/')):'';
+      if(cleanTarget===curParent)return false;
+      if(draggedItem.dir&&(cleanTarget===draggedItem.full||cleanTarget.startsWith(draggedItem.full+'/')))return false;
+      return true;
+    };
+    node.addEventListener('dragover',e=>{
+      if(!canDrop())return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect='move';
+      node.classList.add('drop-target');
+    });
+    node.addEventListener('dragleave',e=>{
+      if(!node.contains(e.relatedTarget))node.classList.remove('drop-target');
+    });
+    node.addEventListener('drop',e=>{
+      if(!canDrop())return;
+      e.preventDefault();
+      e.stopPropagation();
+      node.classList.remove('drop-target');
+      const item=draggedItem;
+      draggedItem=null;
+      moveItemToDir(item,cleanTarget);
+    });
+  }
+
+  function openContextMenu(e,it,full){
+    e.preventDefault();
+    e.stopPropagation();
+    closeContextMenu();
+    const menu=el(`<div class="fctx-menu"></div>`);
+    menu.append(el(`<div class="fctx-hdr" title="${it.name}">${it.dir?'📁':'📄'} ${it.name}</div>`));
+
+    const addItem=(label,onClick,danger=false)=>{
+      const btn=el(`<button class="fctx-item ${danger?'danger':''}">${label}</button>`);
+      btn.onclick=ev=>{ev.stopPropagation();closeContextMenu();onClick();};
+      menu.append(btn);
+    };
+    const addSep=()=>menu.append(el(`<div class="fctx-sep"></div>`));
+
+    if(it.dir){
+      addItem('📂 Open Folder',()=>{currentPath=full;load();});
+      addItem('✏️ Rename Folder',()=>promptRename(it,full));
+      addItem('📦 Move Folder…',()=>promptMove(it,full));
+      addSep();
+      addItem('🗑️ Delete Folder',()=>confirmDeleteFolder(it,full),true);
+    }else{
+      addItem('🚀 Start Print',()=>{
+        confirmBox('Start Print?',`Begin printing "${it.name}" immediately?`,'Start Print',async()=>{
+          toast('Starting print…');
+          try{await MR.startPrint(full);go('printing');}catch(err){toast('⚠ Start failed: '+err.message);}
+        });
+      });
+      addItem('📥 Load for Print',()=>loadFileForPrint(full,it));
+      addItem('ℹ️ File Details',()=>showDetails(full,it));
+      addSep();
+      addItem('✏️ Rename File',()=>promptRename(it,full));
+      addItem('📦 Move File…',()=>promptMove(it,full));
+      addItem('💾 Download',()=>{
+        const a=document.createElement('a');
+        a.href=(MR.base||'')+'/server/files/gcodes/'+encodeURI(full);
+        a.download=it.name;
+        a.click();
+        toast(`💾 Downloading ${it.name}…`);
+      });
+      addSep();
+      addItem('🗑️ Delete File',()=>confirmDelete(it,full),true);
+    }
+
+    document.body.append(menu);
+    activeCtxMenu=menu;
+    const rect=menu.getBoundingClientRect();
+    let x=e.clientX,y=e.clientY;
+    if(!x&&!y&&e.currentTarget){
+      const br=e.currentTarget.getBoundingClientRect();
+      x=br.right-rect.width;y=br.bottom+4;
+    }
+    if(x+rect.width>window.innerWidth-8)x=Math.max(8,window.innerWidth-rect.width-8);
+    if(y+rect.height>window.innerHeight-8)y=Math.max(8,window.innerHeight-rect.height-8);
+    menu.style.left=x+'px';
+    menu.style.top=y+'px';
+  }
+
   function renderBreadcrumbs(){
     const elBread=$('#f-breadcrumbs');
     if(!elBread)return;
     elBread.innerHTML='';
-    const rootChip=el(`<button class="crumb-chip ${!currentPath?'active':''}">${ICON('folder')} gcodes</button>`);
+    const rootChip=el(`<button class="crumb-chip ${!currentPath?'active':''}" title="${currentPath?'Click to open root, or drop files here to move to /':'Current folder: /'}">${ICON('folder')} gcodes</button>`);
     rootChip.onclick=()=>{if(currentPath){currentPath='';load();}};
+    attachDropTarget(rootChip,'');
     elBread.append(rootChip);
 
     if(currentPath){
@@ -108,8 +241,9 @@ App.pages.files=(()=>{
         acc+=(acc?'/':'')+p;
         const currentAcc=acc;
         const sep=el(`<span class="crumb-sep">/</span>`);
-        const chip=el(`<button class="crumb-chip ${idx===parts.length-1?'active':''}">${p}</button>`);
+        const chip=el(`<button class="crumb-chip ${idx===parts.length-1?'active':''}" title="${idx===parts.length-1?'Current folder':'Click to open, or drop files here to move to /'+currentAcc}">${p}</button>`);
         chip.onclick=()=>{if(currentPath!==currentAcc){currentPath=currentAcc;load();}};
+        attachDropTarget(chip,currentAcc);
         elBread.append(sep,chip);
       });
     }
@@ -117,6 +251,47 @@ App.pages.files=(()=>{
     if(destEl)destEl.textContent='/'+(currentPath?currentPath+'/':'');
     const dfoDest=$('#dfo-dest');
     if(dfoDest)dfoDest.textContent='/'+(currentPath?currentPath+'/':'');
+  }
+
+  function createParentItem(){
+    const parts=currentPath.split('/').filter(Boolean);
+    parts.pop();
+    const parentPath=parts.join('/');
+    if(viewMode==='grid'){
+      const card=el(`
+        <div class="fcard is-dir" title="Back to /${parentPath||'gcodes'} (or drop items here to move up)">
+          <div class="fcard-thumb-wrap" style="opacity:.85">
+            ${ICON('up',40)}
+          </div>
+          <div class="fcard-body">
+            <div class="fcard-title">.. (Up One Level)</div>
+            <div class="fcard-meta">
+              <span style="font-weight:700">/${parentPath}</span>
+              <span style="color:#00E5FF;font-weight:800">‹ Back</span>
+            </div>
+          </div>
+        </div>
+      `);
+      card.onclick=()=>{currentPath=parentPath;load();};
+      attachDropTarget(card,parentPath);
+      return card;
+    }else{
+      const row=el(`
+        <div class="frow is-dir" title="Back to /${parentPath||'gcodes'} (or drop items here to move up)">
+          <div class="frow-thumb" style="color:#00E5FF">${ICON('up',22)}</div>
+          <div class="frow-main">
+            <div class="frow-title">.. (Up One Level)</div>
+            <div class="frow-sub"><span>Drop files or folders here to move to /${parentPath}</span></div>
+          </div>
+          <div class="frow-actions">
+            <button class="btn sm" style="font-weight:700">‹ Back</button>
+          </div>
+        </div>
+      `);
+      row.onclick=()=>{currentPath=parentPath;load();};
+      attachDropTarget(row,parentPath);
+      return row;
+    }
   }
 
   function filterAndRender(){
@@ -138,12 +313,16 @@ App.pages.files=(()=>{
     box.innerHTML='';
     box.className=viewMode==='grid'?'filegrid':'filelist';
 
+    if(currentPath){
+      box.append(createParentItem());
+    }
+
     if(!items.length){
-      box.innerHTML=`<div class="col" style="align-items:center;justify-content:center;padding:48px 20px;grid-column:1/-1;color:var(--muted)">
+      box.append(el(`<div class="col" style="align-items:center;justify-content:center;padding:48px 20px;grid-column:1/-1;color:var(--muted)">
         <div style="width:48px;height:48px;margin-bottom:8px;opacity:.5">${ICON('files')}</div>
         <div style="font-size:14.5px;font-weight:700">${searchQuery?'No files match "'+searchQuery+'"':'This folder is empty'}</div>
         <div class="sub" style="margin-top:4px">Drag and drop files here to upload into /${currentPath}</div>
-      </div>`;
+      </div>`));
     }else if(viewMode==='grid'){
       items.forEach(it=>box.append(createGridCard(it)));
     }else{
@@ -160,7 +339,8 @@ App.pages.files=(()=>{
     const full=(currentPath?currentPath+'/':'')+it.name;
     if(it.dir){
       const card=el(`
-        <div class="fcard is-dir">
+        <div class="fcard is-dir" title="Click to open • Right-click for options • Drag files here to move">
+          <button class="fcard-dir-menu" title="Folder options (Rename, Move, Delete)">⋮</button>
           <div class="fcard-thumb-wrap">
             ${ICON('folder',52)}
           </div>
@@ -173,13 +353,17 @@ App.pages.files=(()=>{
           </div>
         </div>
       `);
+      $('.fcard-dir-menu',card).onclick=e=>openContextMenu(e,it,full);
       card.onclick=()=>{currentPath=full;load();};
+      card.oncontextmenu=e=>openContextMenu(e,it,full);
+      attachDragSource(card,it,full);
+      attachDropTarget(card,full);
       return card;
     }
 
     const is3mf=/\.3mf$/i.test(it.name);
     const card=el(`
-      <div class="fcard">
+      <div class="fcard" title="Click for details • Right-click for Rename / Move / Delete • Drag onto a folder to move">
         <div class="fcard-thumb-wrap">
           <div class="fcard-thumb-fallback">${ICON('cube',56)}</div>
           <img class="fcard-img" style="display:none" alt="">
@@ -230,6 +414,8 @@ App.pages.files=(()=>{
       });
     };
     card.onclick=()=>showDetails(full,it);
+    card.oncontextmenu=e=>openContextMenu(e,it,full);
+    attachDragSource(card,it,full);
 
     loadThumbAndMeta(full,card);
     return card;
@@ -239,24 +425,29 @@ App.pages.files=(()=>{
     const full=(currentPath?currentPath+'/':'')+it.name;
     if(it.dir){
       const row=el(`
-        <div class="frow">
+        <div class="frow is-dir" title="Click to open • Right-click for options • Drag files here to move">
           <div class="frow-thumb" style="color:#00E5FF">${ICON('folder',26)}</div>
           <div class="frow-main">
             <div class="frow-title">${it.name}</div>
-            <div class="frow-sub"><span>Folder</span></div>
+            <div class="frow-sub"><span>Folder</span><span>•</span><span>Right-click to rename, move, or delete</span></div>
           </div>
           <div class="frow-actions">
+            <button class="btn sm r-dir-menu" title="Folder options (Rename, Move, Delete)" style="font-weight:900;padding:4px 10px">⋮</button>
             <button class="btn sm pri" style="font-weight:700">Open ›</button>
           </div>
         </div>
       `);
+      $('.r-dir-menu',row).onclick=e=>openContextMenu(e,it,full);
       row.onclick=()=>{currentPath=full;load();};
+      row.oncontextmenu=e=>openContextMenu(e,it,full);
+      attachDragSource(row,it,full);
+      attachDropTarget(row,full);
       return row;
     }
 
     const is3mf=/\.3mf$/i.test(it.name);
     const row=el(`
-      <div class="frow">
+      <div class="frow" title="Click for details • Right-click for Rename / Move / Delete • Drag onto a folder to move">
         <div class="frow-thumb">
           <div class="row-thumb-fallback">${ICON('cube',24)}</div>
           <img class="row-thumb-img" style="display:none" alt="">
@@ -305,6 +496,8 @@ App.pages.files=(()=>{
       });
     };
     row.onclick=()=>showDetails(full,it);
+    row.oncontextmenu=e=>openContextMenu(e,it,full);
+    attachDragSource(row,it,full);
 
     loadThumbAndMeta(full,row);
     return row;
@@ -427,8 +620,12 @@ App.pages.files=(()=>{
           ].map(([k,v])=>`<div class="row" style="justify-content:space-between"><span style="color:var(--muted)">${k}:</span><b style="color:#F8FAFC">${v}</b></div>`).join('')}
         </div>
       </div>
-      <div class="row" style="justify-content:space-between;align-items:center;margin-top:12px">
-        <button class="btn danger sm" id="ddel" style="gap:4px">${ICON('trash')} Delete File</button>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:8px">
+        <div class="row" style="gap:6px">
+          <button class="btn danger sm" id="ddel" style="gap:4px">${ICON('trash')} Delete</button>
+          <button class="btn sm" id="dren" title="Rename file">✏️ Rename</button>
+          <button class="btn sm" id="dmov" title="Move file to another folder">📦 Move</button>
+        </div>
         <div class="row" style="gap:8px">
           <button class="btn" id="dc">Close</button>
           <button class="btn sm" id="dsave" title="Save / Download G-code to computer">${ICON('download')} Save</button>
@@ -441,6 +638,8 @@ App.pages.files=(()=>{
     const close=modal(n);
     $('#dx',n).onclick=$('#dc',n).onclick=close;
     $('#ddel',n).onclick=()=>{close();confirmDelete(it,full);};
+    $('#dren',n).onclick=()=>{close();promptRename(it,full);};
+    $('#dmov',n).onclick=()=>{close();promptMove(it,full);};
     $('#dsave',n).onclick=()=>{
       const a=document.createElement('a');
       a.href=(MR.base||'')+'/server/files/gcodes/'+encodeURI(full);
@@ -574,30 +773,190 @@ App.pages.files=(()=>{
     },true);
   }
 
+  function confirmDeleteFolder(it,full){
+    confirmBox(
+      'Delete Folder?',
+      `Are you sure you want to permanently delete folder "${it.name}" and all files inside it?`,
+      'Delete Folder',
+      async()=>{
+        try{
+          await MR.deleteDirectory(full,true);
+          toast(`✓ Deleted folder ${it.name}`);
+          load();
+        }catch(err){
+          toast('⚠ Delete folder failed: '+(err.message||'Server error'));
+        }
+      },
+      true
+    );
+  }
+
+  function promptRename(it,full){
+    const label=it.dir?'Folder':'File';
+    const n=el(`<div class="dlg" style="max-width:420px;border:1.5px solid rgba(0,229,255,.4)">
+      <div class="row" style="align-items:center;margin-bottom:6px">
+        <h3 class="grow" style="margin:0">Rename ${label}</h3>
+        <button class="x" id="rnx">✕</button>
+      </div>
+      <div class="sub">Current: /${full}</div>
+      <input id="rn-input" placeholder="New ${label.toLowerCase()} name" style="width:100%;margin:12px 0;padding:9px 11px;border-radius:8px">
+      <div class="row" style="justify-content:flex-end;gap:8px">
+        <button class="btn" id="rnc">Cancel</button>
+        <button class="btn pri" id="rns">Rename</button>
+      </div>
+    </div>`);
+    const close=modal(n);
+    const inp=$('#rn-input',n);
+    inp.value=it.name;
+    setTimeout(()=>{
+      inp.focus();
+      if(!it.dir&&it.name.includes('.')){
+        inp.setSelectionRange(0,it.name.lastIndexOf('.'));
+      }else{
+        inp.select();
+      }
+    },30);
+
+    const submit=async()=>{
+      const newName=inp.value.trim();
+      if(!newName){toast('⚠ Name cannot be empty');return;}
+      if(/[\/\\]/.test(newName)||newName==='.'||newName==='..'){
+        toast('⚠ Invalid characters in name');
+        return;
+      }
+      if(newName===it.name){close();return;}
+      const parent=full.includes('/')?full.slice(0,full.lastIndexOf('/')):'';
+      const newFull=(parent?parent+'/':'')+newName;
+      $('#rns',n).disabled=true;
+      try{
+        await MR.moveItem(full,newFull);
+        if(metaCache[full]){metaCache[newFull]=metaCache[full];delete metaCache[full];}
+        close();
+        toast(`✓ Renamed to ${newName}`);
+        load();
+      }catch(err){
+        $('#rns',n).disabled=false;
+        toast('⚠ Rename failed: '+(err.message||'Server error'));
+      }
+    };
+
+    $('#rnx',n).onclick=$('#rnc',n).onclick=close;
+    $('#rns',n).onclick=submit;
+    inp.onkeydown=e=>{
+      if(e.key==='Enter'){e.preventDefault();submit();}
+      else if(e.key==='Escape'){close();}
+    };
+  }
+
+  function promptMove(it,full){
+    const label=it.dir?'Folder':'File';
+    const curParent=full.includes('/')?full.slice(0,full.lastIndexOf('/')):'';
+    let selectedDir=null;
+
+    const n=el(`<div class="dlg" style="max-width:460px;border:1.5px solid rgba(0,229,255,.4)">
+      <div class="row" style="align-items:center;margin-bottom:6px">
+        <h3 class="grow" style="margin:0">Move ${label}</h3>
+        <button class="x" id="mvx">✕</button>
+      </div>
+      <div class="sub">Moving: <b style="color:#F8FAFC">${it.name}</b> (from <span class="mono">/${curParent}</span>)</div>
+      <div id="mv-list" class="move-dir-list">
+        <div class="sub" style="padding:18px;text-align:center">Scanning folders…</div>
+      </div>
+      <div class="row" style="justify-content:flex-end;gap:8px">
+        <button class="btn" id="mvc">Cancel</button>
+        <button class="btn pri" id="mvs" disabled>Move Here</button>
+      </div>
+    </div>`);
+
+    const close=modal(n);
+    $('#mvx',n).onclick=$('#mvc',n).onclick=close;
+
+    const doMove=async()=>{
+      if(selectedDir===null)return;
+      $('#mvs',n).disabled=true;
+      close();
+      await moveItemToDir({full,name:it.name,dir:!!it.dir},selectedDir);
+    };
+    $('#mvs',n).onclick=doMove;
+
+    MR.listAllDirs().then(dirs=>{
+      const list=$('#mv-list',n);
+      list.innerHTML='';
+      dirs.forEach(d=>{
+        const isCurrent=d===curParent;
+        const isSelfOrChild=it.dir&&(d===full||d.startsWith(full+'/'));
+        const disabled=isCurrent||isSelfOrChild;
+        const depth=d?d.split('/').length:0;
+        const dispName=d?d.split('/').pop():'/ (gcodes root)';
+        const tag=isCurrent?'Current':(isSelfOrChild?'Inside self':'');
+
+        const btn=el(`<button class="move-dir-item ${disabled?'disabled':''}" style="padding-left:${12+depth*18}px" title="/${d}">
+          <span style="color:#00E5FF;display:inline-flex">${ICON('folder',16)}</span>
+          <span class="fn" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${dispName}</span>
+          ${tag?`<span class="mdi-tag">${tag}</span>`:''}
+        </button>`);
+
+        if(!disabled){
+          btn.onclick=()=>{
+            list.querySelectorAll('.move-dir-item').forEach(x=>x.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedDir=d;
+            $('#mvs',n).disabled=false;
+          };
+          btn.ondblclick=()=>{
+            selectedDir=d;
+            doMove();
+          };
+        }
+        list.append(btn);
+      });
+    }).catch(()=>{
+      $('#mv-list',n).innerHTML='<div class="sub" style="padding:18px;text-align:center;color:#F87171">Failed to load folders</div>';
+    });
+  }
+
   function promptNewFolder(){
-    const n=el(`<div class="dlg" style="max-width:400px">
-      <h3>Create New Folder</h3>
+    const n=el(`<div class="dlg" style="max-width:400px;border:1.5px solid rgba(0,229,255,.4)">
+      <div class="row" style="align-items:center;margin-bottom:6px">
+        <h3 class="grow" style="margin:0">Create New Folder</h3>
+        <button class="x" id="nfx">✕</button>
+      </div>
       <div class="sub">Target: /${currentPath?currentPath+'/':''}</div>
-      <input id="new-folder-name" placeholder="Folder name" style="width:100%;margin:12px 0;padding:8px 10px;border-radius:8px">
+      <input id="new-folder-name" placeholder="Folder name" style="width:100%;margin:12px 0;padding:9px 11px;border-radius:8px">
       <div class="row" style="justify-content:flex-end;gap:8px">
         <button class="btn" id="nfc">Cancel</button>
         <button class="btn pri" id="nfs">Create Folder</button>
       </div>
     </div>`);
     const close=modal(n);
-    $('#nfc',n).onclick=close;
-    $('#nfs',n).onclick=async()=>{
-      const name=$('#new-folder-name',n).value.trim();
-      if(!name)return;
+    const inp=$('#new-folder-name',n);
+    setTimeout(()=>inp.focus(),30);
+
+    const submit=async()=>{
+      const name=inp.value.trim();
+      if(!name){toast('⚠ Folder name cannot be empty');return;}
+      if(/[\/\\]/.test(name)||name==='.'||name==='..'){
+        toast('⚠ Invalid characters in folder name');
+        return;
+      }
       const targetPath=(currentPath?currentPath+'/':'')+name;
+      $('#nfs',n).disabled=true;
       try{
         await MR.createDirectory(targetPath);
         close();
         toast('✓ Created folder '+name);
         load();
       }catch(err){
-        toast('⚠ Failed to create folder');
+        $('#nfs',n).disabled=false;
+        toast('⚠ Failed to create folder: '+(err.message||'Server error'));
       }
+    };
+
+    $('#nfx',n).onclick=$('#nfc',n).onclick=close;
+    $('#nfs',n).onclick=submit;
+    inp.onkeydown=e=>{
+      if(e.key==='Enter'){e.preventDefault();submit();}
+      else if(e.key==='Escape'){close();}
     };
   }
 
@@ -902,6 +1261,7 @@ App.pages.files=(()=>{
 
   ['dragenter','dragover'].forEach(evt=>{
     dropzone.addEventListener(evt,e=>{
+      if(draggedItem)return;
       e.preventDefault();
       e.stopPropagation();
       dropzone.classList.add('dragover');
@@ -909,12 +1269,14 @@ App.pages.files=(()=>{
   });
   ['dragleave','dragend'].forEach(evt=>{
     dropzone.addEventListener(evt,e=>{
+      if(draggedItem)return;
       e.preventDefault();
       e.stopPropagation();
       dropzone.classList.remove('dragover');
     });
   });
   dropzone.addEventListener('drop',e=>{
+    if(draggedItem)return;
     e.preventDefault();
     e.stopPropagation();
     dropzone.classList.remove('dragover');
@@ -927,21 +1289,25 @@ App.pages.files=(()=>{
   const overlay=$('#drag-fullscreen-overlay');
   let dragCounter=0;
   window.addEventListener('dragenter',e=>{
+    if(draggedItem)return;
     if(e.dataTransfer?.types?.includes('Files')){
       dragCounter++;
       if(overlay)overlay.classList.add('active');
     }
   });
   window.addEventListener('dragleave',e=>{
+    if(draggedItem)return;
     dragCounter=Math.max(0,dragCounter-1);
     if(dragCounter===0&&overlay)overlay.classList.remove('active');
   });
   window.addEventListener('dragover',e=>{
+    if(draggedItem)return;
     if(e.dataTransfer?.types?.includes('Files')){
       e.preventDefault();
     }
   });
   window.addEventListener('drop',e=>{
+    if(draggedItem)return;
     dragCounter=0;
     if(overlay)overlay.classList.remove('active');
     if(e.dataTransfer?.files?.length){

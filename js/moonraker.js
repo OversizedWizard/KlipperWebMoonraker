@@ -427,7 +427,42 @@ class MoonrakerClient{
     return r.ok;
   }
   async createDirectory(dirPath){
-    return await this.post('/server/files/directory',{root:'gcodes',path:dirPath});
+    const clean=String(dirPath||'').replace(/^\/+|\/+$/g,'');
+    if(!clean)throw new Error('Folder name is required');
+    return await this.post('/server/files/directory',{path:'gcodes/'+clean});
+  }
+  async deleteDirectory(dirPath,force=true){
+    const clean=String(dirPath||'').replace(/^\/+|\/+$/g,'');
+    if(!clean)throw new Error('Folder path is required');
+    const q='?path='+encodeURIComponent('gcodes/'+clean)+'&force='+(force?'true':'false');
+    return await this.del('/server/files/directory'+q);
+  }
+  async moveItem(sourcePath,destPath){
+    const src=String(sourcePath||'').replace(/^\/+|\/+$/g,'');
+    const dst=String(destPath||'').replace(/^\/+|\/+$/g,'');
+    if(!src||!dst)throw new Error('Source and destination paths are required');
+    return await this.post('/server/files/move',{source:'gcodes/'+src,dest:'gcodes/'+dst});
+  }
+  async listAllDirs(){
+    const result=[''];
+    const queue=[''];
+    const seen=new Set(['']);
+    while(queue.length&&result.length<250){
+      const cur=queue.shift();
+      try{
+        const r=await this.listFiles(cur);
+        const dirs=(r?.dirs||[]).filter(d=>d.dirname&&!d.dirname.startsWith('.'));
+        for(const d of dirs){
+          const sub=(cur?cur+'/':'')+d.dirname;
+          if(!seen.has(sub)){
+            seen.add(sub);
+            result.push(sub);
+            queue.push(sub);
+          }
+        }
+      }catch(e){}
+    }
+    return result.sort((a,b)=>a.localeCompare(b));
   }
   async systemLoads(){
     const out={};
