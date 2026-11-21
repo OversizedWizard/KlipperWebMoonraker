@@ -33,7 +33,7 @@ if ! sudo -v; then
 fi
 
 echo -e "${C_GREEN}[1/4] Checking system dependencies (nginx)...${C_RESET}"
-if ! command -v nginx >/dev/null 2>&1; then
+if ! command -v nginx >/dev/null 2>&1 && [ ! -x /usr/sbin/nginx ]; then
     sudo apt-get update -y
     sudo apt-get install -y nginx
 fi
