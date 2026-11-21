@@ -203,6 +203,10 @@ App.pages.settings = (() => {
         <div class="row" style="justify-content:space-between"><span style="color:var(--muted)">Moonraker Updater:</span><b class="mono" id="wu-mgr" style="color:#94A3B8">Checking…</b></div>
       </div>
       <div id="wu-status" class="box" style="margin:8px 0;padding:9px 12px;font-size:12.5px;color:#CBD5E1">Checking for updates…</div>
+      <div id="wu-changelog-wrap" class="box col" style="display:none;margin:8px 0;padding:9px 12px;gap:6px;background:rgba(7,11,20,.75);border-color:rgba(0,229,255,.3)">
+        <div id="wu-changelog-title" style="font-size:11px;font-weight:900;letter-spacing:.6px;color:#67E8F9">📋 WHAT'S NEW IN THIS UPDATE</div>
+        <div id="wu-changelog" class="col" style="max-height:170px;overflow-y:auto;gap:5px;font-size:12px"></div>
+      </div>
       <div class="row" style="justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:8px">
         <button class="btn sm" id="wu-check">🔍 Check Again</button>
         <div class="row" style="gap:8px">
@@ -222,6 +226,29 @@ App.pages.settings = (() => {
     const goBtn = $('#wu-go', n);
     const enableBtn = $('#wu-enable', n);
     const checkBtn = $('#wu-check', n);
+    const logWrap = $('#wu-changelog-wrap', n);
+    const logTitle = $('#wu-changelog-title', n);
+    const logBox = $('#wu-changelog', n);
+
+    const escHtml = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const renderChangelog = (entries, titleText) => {
+      if (!entries || !entries.length) {
+        logWrap.style.display = 'none';
+        return;
+      }
+      logTitle.textContent = titleText || "📋 WHAT'S NEW IN THIS UPDATE";
+      logBox.innerHTML = entries.map(c => {
+        const sha = escHtml((c.sha || '').slice(0, 7));
+        const subj = escHtml(c.subject || c.message || '');
+        const dt = c.date ? new Date(typeof c.date === 'number' ? c.date * 1000 : c.date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+        return `<div style="display:flex;gap:8px;align-items:flex-start;padding:4px 6px;border-radius:6px;background:rgba(255,255,255,.04)">
+          <span class="mono" style="color:#38BDF8;font-weight:800;font-size:11px;flex:none">${sha || '•'}</span>
+          <span style="color:#E2E8F0;flex:1;line-height:1.35">${subj}</span>
+          ${dt ? `<span class="sub" style="font-size:10.5px;flex:none">${escHtml(dt)}</span>` : ''}
+        </div>`;
+      }).join('');
+      logWrap.style.display = 'flex';
+    };
 
     let hasMgr = false;
 
@@ -229,6 +256,7 @@ App.pages.settings = (() => {
       checkBtn.disabled = true;
       goBtn.disabled = true;
       enableBtn.style.display = 'none';
+      logWrap.style.display = 'none';
       remoteEl.textContent = 'Checking…';
       statusEl.style.color = '#CBD5E1';
       statusEl.textContent = 'Checking GitHub and Moonraker update_manager…';
@@ -249,7 +277,8 @@ App.pages.settings = (() => {
       hasMgr = !!mrInfo;
       const curHash = mrInfo?.current_hash ? mrInfo.current_hash.slice(0, 7) : '';
       const remHash = mrInfo?.remote_hash ? mrInfo.remote_hash.slice(0, 7) : '';
-      const commitsBehind = (mrInfo?.commits_behind || []).length;
+      const commitsBehindList = Array.isArray(mrInfo?.commits_behind) ? mrInfo.commits_behind : [];
+      const commitsBehind = commitsBehindList.length;
 
       localEl.textContent = `v${localVer}` + (curHash ? ` (${curHash})` : '');
       const remText = ghVer ? `v${ghVer}` : (remHash ? remHash : 'Unavailable');
@@ -273,6 +302,28 @@ App.pages.settings = (() => {
         statusEl.innerHTML = `⬆ <b>Update available!</b> ${ghVer ? `v${localVer} → v${ghVer}` : ''}${commitsBehind ? ` (${commitsBehind} new commit${commitsBehind === 1 ? '' : 's'})` : ''}`;
         const badge = $('#s-ver-badge');
         if (badge) badge.textContent = `v${localVer} • UPDATE AVAILABLE`;
+
+        if (commitsBehindList.length) {
+          renderChangelog(commitsBehindList, `📋 WHAT'S NEW (${commitsBehindList.length} CHANGE${commitsBehindList.length === 1 ? '' : 'S'})`);
+        } else {
+          // Fallback: fetch recent commits from GitHub API
+          try {
+            const url = curHash
+              ? `https://api.github.com/repos/OversizedWizard/KlipperWebMoonraker/compare/${curHash}...main`
+              : `https://api.github.com/repos/OversizedWizard/KlipperWebMoonraker/commits?sha=main&per_page=6`;
+            const gr = await fetch(url);
+            if (gr.ok) {
+              const gd = await gr.json();
+              const arr = Array.isArray(gd) ? gd : (gd.commits || []).slice().reverse();
+              const mapped = arr.map(x => ({
+                sha: x.sha,
+                subject: (x.commit?.message || '').split('\n')[0],
+                date: x.commit?.author?.date || ''
+              }));
+              renderChangelog(mapped, `📋 WHAT'S NEW (${mapped.length} CHANGE${mapped.length === 1 ? '' : 'S'})`);
+            }
+          } catch (e) {}
+        }
       } else {
         statusEl.style.color = '#34D399';
         statusEl.innerHTML = `✓ <b>Web UI is up to date</b> (v${localVer})`;
