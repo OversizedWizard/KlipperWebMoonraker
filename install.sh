@@ -69,17 +69,44 @@ fi
 REPLACE_OLD=${REPLACE_OLD:-y}
 
 echo -e "\n${C_GREEN}[3/4] Installing web interface files to ${DEST_DIR}...${C_RESET}"
-if [ -d "$DEST_DIR" ]; then
+if [ -L "$DEST_DIR" ] || [ -d "$DEST_DIR" ]; then
     sudo rm -rf "$DEST_DIR"
 fi
-sudo mkdir -p "$DEST_DIR"
-sudo cp -r "$SRC_DIR/index.html" "$SRC_DIR/css" "$SRC_DIR/js" "$DEST_DIR/"
-if [ -n "${SUDO_USER:-}" ]; then
-    sudo chown -R "${SUDO_USER}:${SUDO_USER}" "$DEST_DIR" || true
-elif [ "$(id -u)" -ne 0 ]; then
-    sudo chown -R "$(id -un):$(id -gn)" "$DEST_DIR" || true
+if [ -d "$SRC_DIR/.git" ]; then
+    # Symlink directly to the git repo so Moonraker/git updates take effect immediately
+    sudo chmod a+x "$(dirname "$SRC_DIR")" 2>/dev/null || true
+    sudo chmod -R a+rX "$SRC_DIR"
+    sudo ln -s "$SRC_DIR" "$DEST_DIR"
+else
+    sudo mkdir -p "$DEST_DIR"
+    sudo cp -r "$SRC_DIR/index.html" "$SRC_DIR/css" "$SRC_DIR/js" "$DEST_DIR/"
+    [ -f "$SRC_DIR/VERSION" ] && sudo cp "$SRC_DIR/VERSION" "$DEST_DIR/"
+    sudo chmod -R a+rX "$DEST_DIR"
 fi
-sudo chmod -R a+rX "$DEST_DIR"
+
+# Register [update_manager klipper_web_ui] in moonraker.conf so in-app Web UI updates work out of the box
+MR_CONF=""
+for candidate in "$HOME/printer_data/config/moonraker.conf" "/home/${SUDO_USER:-pi}/printer_data/config/moonraker.conf"; do
+    if [ -f "$candidate" ]; then
+        MR_CONF="$candidate"
+        break
+    fi
+done
+if [ -n "$MR_CONF" ] && [ -d "$SRC_DIR/.git" ]; then
+    if ! grep -q "\[update_manager klipper_web_ui\]" "$MR_CONF" 2>/dev/null; then
+        cat <<MREOF | sudo tee -a "$MR_CONF" >/dev/null
+
+[update_manager klipper_web_ui]
+type: git_repo
+path: ${SRC_DIR}
+origin: https://github.com/OversizedWizard/KlipperWebMoonraker.git
+primary_branch: main
+is_system_service: False
+MREOF
+        echo -e "${C_CYAN}Added [update_manager klipper_web_ui] to ${MR_CONF} — restarting Moonraker...${C_RESET}"
+        sudo systemctl restart moonraker 2>/dev/null || true
+    fi
+fi
 
 # Keep /home/pi/klipper-web-ui synced if it was used previously
 if [ -d "/home/pi/klipper-web-ui" ] || [ -L "/home/pi/klipper-web-ui" ]; then

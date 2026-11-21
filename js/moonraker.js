@@ -470,6 +470,15 @@ class MoonrakerClient{
     try{const s=await this.get('/machine/system_info');out.sys=s.system_info}catch(e){}
     try{const m=await this.get('/printer/objects/query?mcu&system_stats');out.mcu=m.status}catch(e){}
     return out}
+  async getUpdateStatus(refresh=false){
+    if(!this.connected||!this.base)await this.whenConnected(6000).catch(()=>{});
+    return await this.get('/machine/update/status'+(refresh?'?refresh=true':''),20000);
+  }
+  async updateClient(name){
+    if(!this.connected||!this.base)await this.whenConnected(6000).catch(()=>{});
+    return await this.post('/machine/update/client?name='+encodeURIComponent(name),null,120000);
+  }
+  restartMoonraker(){return this.post('/server/restart').catch(()=>false)}
   async gcodeStore(count=10){try{return (await this.get('/server/gcode_store?count='+count)).gcode_store}catch(e){return[]}}
   /* ---------- PRINT_START health check ---------- */
   static analyzeConfig(text){

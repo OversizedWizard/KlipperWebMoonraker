@@ -142,6 +142,7 @@ App.pages.settings = (() => {
      <div class="cc" id="s-cam">${CICON('camera')}<div><div class="ti">Webcam & Camera Controls</div><div class="ds">Live tuning, rotation, flipping, resolution & stream URLs.</div><span class="cmd" id="s-cam-badge">${getCamBadge()}</span></div><span class="ar">›</span></div>
      <div class="cc" id="s-backup">${ICON('folder')}<div><div class="ti">Backup All Configs (.zip)</div><div class="ds">Download printer.cfg, moonraker.conf & macros as a ZIP.</div><span class="cmd">ONE-CLICK ZIP BACKUP</span></div><span class="ar">›</span></div>
      <div class="cc" id="s-host">${ICON('settings')}<div><div class="ti">Moonraker Host</div><div class="ds">${MR.base || 'not connected'}</div><span class="cmd">CONNECTION</span></div><span class="ar">›</span></div>
+     <div class="cc" id="s-update">${ICON('reload')}<div><div class="ti">Web UI Software Update</div><div class="ds">Check GitHub & update Klipper Web UI.</div><span class="cmd" id="s-ver-badge">v${window.WEB_UI_VERSION || '1.5.0'}</span></div><span class="ar">›</span></div>
     </div>
     <div class="hdr">DIAGNOSTICS & HARDWARE</div><div class="grid2">
      <div class="cc" id="s-tests">${ICON('endstop')}<div><div class="ti">Printer Tests</div><div class="ds">Motor buzz, endstops & nozzle touch.</div><span class="cmd">MOTORS • ENDSTOPS</span></div><span class="ar">›</span></div>
@@ -183,7 +184,151 @@ App.pages.settings = (() => {
       const n = el(`<div class="dlg" style="max-width:420px"><h3>Moonraker Host</h3><div class="sub">e.g. 192.168.0.99:7125 — leave empty for auto</div><input id="hi" style="width:100%;margin:8px 0" value="${localStorage.getItem('moonraker_host') || ''}"><div class="row" style="justify-content:flex-end"><button class="btn" id="hc">Cancel</button><button class="btn pri" id="hs">Save & Reload</button></div></div>`);
       const cl = modal(n); $('#hc', n).onclick = cl; $('#hs', n).onclick = () => { const v = $('#hi', n).value.trim(); v ? localStorage.setItem('moonraker_host', v) : localStorage.removeItem('moonraker_host'); location.reload() }
     };
+    $('#s-update').onclick = openWebUpdate;
   };
+  function openWebUpdate() {
+    const localVer = window.WEB_UI_VERSION || '1.5.0';
+    const n = el(`<div class="dlg" style="max-width:500px;border:1.5px solid rgba(0,229,255,.45)">
+      <div class="row" style="align-items:center;margin-bottom:8px">
+        <div style="width:28px;color:#00E5FF">${ICON('reload')}</div>
+        <div class="grow">
+          <h3 style="margin:0">Web UI Software Update</h3>
+          <div class="sub">KlipperWebMoonraker (GitHub main)</div>
+        </div>
+        <button class="x" id="wu-x">✕</button>
+      </div>
+      <div class="box col" style="gap:7px;margin:10px 0;font-size:13px">
+        <div class="row" style="justify-content:space-between"><span style="color:var(--muted)">Installed Version:</span><b class="mono" id="wu-local" style="color:#67E8F9">v${localVer}</b></div>
+        <div class="row" style="justify-content:space-between"><span style="color:var(--muted)">Latest on GitHub:</span><b class="mono" id="wu-remote" style="color:#F8FAFC">Checking…</b></div>
+        <div class="row" style="justify-content:space-between"><span style="color:var(--muted)">Moonraker Updater:</span><b class="mono" id="wu-mgr" style="color:#94A3B8">Checking…</b></div>
+      </div>
+      <div id="wu-status" class="box" style="margin:8px 0;padding:9px 12px;font-size:12.5px;color:#CBD5E1">Checking for updates…</div>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:8px">
+        <button class="btn sm" id="wu-check">🔍 Check Again</button>
+        <div class="row" style="gap:8px">
+          <button class="btn" id="wu-close">Close</button>
+          <button class="btn sm" id="wu-enable" style="display:none;border-color:rgba(251,191,36,.5);color:#FDE68A;font-weight:800">⚡ Enable Updater</button>
+          <button class="btn pri" id="wu-go" style="font-weight:800" disabled>⬆ Update Web UI</button>
+        </div>
+      </div>
+    </div>`);
+    const cl = modal(n);
+    $('#wu-x', n).onclick = $('#wu-close', n).onclick = cl;
+
+    const statusEl = $('#wu-status', n);
+    const localEl = $('#wu-local', n);
+    const remoteEl = $('#wu-remote', n);
+    const mgrEl = $('#wu-mgr', n);
+    const goBtn = $('#wu-go', n);
+    const enableBtn = $('#wu-enable', n);
+    const checkBtn = $('#wu-check', n);
+
+    let hasMgr = false;
+
+    const checkNow = async (refresh = true) => {
+      checkBtn.disabled = true;
+      goBtn.disabled = true;
+      enableBtn.style.display = 'none';
+      remoteEl.textContent = 'Checking…';
+      statusEl.style.color = '#CBD5E1';
+      statusEl.textContent = 'Checking GitHub and Moonraker update_manager…';
+
+      let ghVer = null;
+      try {
+        const r = await fetch('https://raw.githubusercontent.com/OversizedWizard/KlipperWebMoonraker/main/VERSION?_=' + Date.now(), { cache: 'no-store' });
+        if (r.ok) ghVer = (await r.text()).trim();
+      } catch (e) {}
+
+      let mrInfo = null;
+      try {
+        const st = await MR.getUpdateStatus(refresh);
+        const vi = st?.version_info || {};
+        mrInfo = vi.klipper_web_ui || vi.KlipperWebMoonraker || null;
+      } catch (e) {}
+
+      hasMgr = !!mrInfo;
+      const curHash = mrInfo?.current_hash ? mrInfo.current_hash.slice(0, 7) : '';
+      const remHash = mrInfo?.remote_hash ? mrInfo.remote_hash.slice(0, 7) : '';
+      const commitsBehind = (mrInfo?.commits_behind || []).length;
+
+      localEl.textContent = `v${localVer}` + (curHash ? ` (${curHash})` : '');
+      const remText = ghVer ? `v${ghVer}` : (remHash ? remHash : 'Unavailable');
+      remoteEl.textContent = remText + (remHash && ghVer ? ` (${remHash})` : '');
+
+      if (hasMgr) {
+        mgrEl.textContent = '✓ Ready (klipper_web_ui)';
+        mgrEl.style.color = '#34D399';
+      } else {
+        mgrEl.textContent = 'Not configured in moonraker.conf';
+        mgrEl.style.color = '#FBBF24';
+        enableBtn.style.display = 'inline-flex';
+      }
+
+      const verDiff = ghVer && ghVer !== localVer;
+      const hashDiff = curHash && remHash && curHash !== remHash;
+      const updateAvail = verDiff || hashDiff || commitsBehind > 0;
+
+      if (updateAvail) {
+        statusEl.style.color = '#67E8F9';
+        statusEl.innerHTML = `⬆ <b>Update available!</b> ${ghVer ? `v${localVer} → v${ghVer}` : ''}${commitsBehind ? ` (${commitsBehind} new commit${commitsBehind === 1 ? '' : 's'})` : ''}`;
+        const badge = $('#s-ver-badge');
+        if (badge) badge.textContent = `v${localVer} • UPDATE AVAILABLE`;
+      } else {
+        statusEl.style.color = '#34D399';
+        statusEl.innerHTML = `✓ <b>Web UI is up to date</b> (v${localVer})`;
+      }
+
+      goBtn.disabled = !hasMgr;
+      goBtn.textContent = updateAvail ? '⬆ Update Web UI' : '⟳ Re-pull Web UI';
+      checkBtn.disabled = false;
+    };
+
+    checkBtn.onclick = () => checkNow(true);
+
+    enableBtn.onclick = async () => {
+      enableBtn.disabled = true;
+      statusEl.style.color = '#FDE68A';
+      statusEl.textContent = 'Adding [update_manager klipper_web_ui] to moonraker.conf…';
+      try {
+        let cfg = await MR.readConfig('moonraker.conf');
+        if (!/\[update_manager\s+klipper_web_ui\]/i.test(cfg)) {
+          cfg = cfg.trimEnd() + `\n\n[update_manager klipper_web_ui]\ntype: git_repo\npath: ~/KlipperWebMoonraker\norigin: https://github.com/OversizedWizard/KlipperWebMoonraker.git\nprimary_branch: main\nis_system_service: False\n`;
+          await MR.writeConfig(cfg, 'moonraker.conf');
+        }
+        statusEl.textContent = 'Restarting Moonraker to activate updater…';
+        await MR.restartMoonraker();
+        toast('✓ Enabled Web UI updater! Reconnecting Moonraker…');
+        setTimeout(() => checkNow(true), 4500);
+      } catch (err) {
+        enableBtn.disabled = false;
+        statusEl.style.color = '#F87171';
+        statusEl.textContent = '⚠ Could not edit moonraker.conf: ' + (err.message || 'error');
+      }
+    };
+
+    goBtn.onclick = async () => {
+      goBtn.disabled = true;
+      checkBtn.disabled = true;
+      goBtn.textContent = '⏳ Updating…';
+      statusEl.style.color = '#67E8F9';
+      statusEl.textContent = 'Pulling latest KlipperWebMoonraker from GitHub via Moonraker…';
+      try {
+        await MR.updateClient('klipper_web_ui');
+        statusEl.style.color = '#34D399';
+        statusEl.innerHTML = '✓ <b>Updated successfully!</b> Reloading Web UI…';
+        toast('✓ Web UI updated! Reloading…');
+        setTimeout(() => location.reload(true), 1200);
+      } catch (err) {
+        goBtn.disabled = false;
+        checkBtn.disabled = false;
+        goBtn.textContent = '⬆ Update Web UI';
+        statusEl.style.color = '#F87171';
+        statusEl.textContent = '⚠ Update failed: ' + (err.message || 'Server error');
+      }
+    };
+
+    checkNow(false);
+  }
   function openSleepSettings() {
     let cur = +(localStorage.getItem('sleep_timeout_min') ?? 10);
     const opts = [[0, 'Never (Off)'], [2, '2 min'], [5, '5 min'], [10, '10 min'], [15, '15 min'], [30, '30 min']];
