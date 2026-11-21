@@ -2,13 +2,26 @@
 
 HTML/CSS/JS recreation of the Klipper Screen app. No build step, no dependencies. Talks directly to Moonraker.
 
-## Install on the Pi (replaces Mainsail/Fluidd on port 80)
+## Install on the Pi (from GitHub)
 ```bash
-scp -r html pi@<pi-ip>:~/
-ssh pi@<pi-ip>
-sudo bash ~/html/install_web_ui.sh
+git clone https://github.com/OversizedWizard/KlipperWebMoonraker.git ~/KlipperWebMoonraker
+cd ~/KlipperWebMoonraker
+./install.sh
 ```
-Existing nginx sites are backed up to `/etc/nginx/klipper-screen-backup-*`. Restore by copying them back to `sites-enabled` and restarting nginx.
+During installation you can choose to **replace Port 80** (backing up Mainsail/Fluidd to `/etc/nginx/klipper-web-backup`) or install on a **secondary port** (e.g. `8090`).
+
+### Update
+```bash
+cd ~/KlipperWebMoonraker
+git pull origin main
+./install.sh
+```
+
+### Uninstall / Restore Mainsail or Fluidd
+```bash
+cd ~/KlipperWebMoonraker
+./uninstall.sh
+```
 
 If the page shows **Offline**, add your network to `moonraker.conf`:
 ```

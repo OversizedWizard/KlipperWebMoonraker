@@ -61,7 +61,11 @@ if [ -n "$EXISTING_SITES" ]; then
 fi
 echo -e "${C_AMBER}----------------------------------------------------------${C_RESET}"
 
-read -r -p "Would you like to replace the existing web interface with the new one? (y/n) [default: y]: " REPLACE_OLD
+if [ -t 0 ]; then
+    read -r -p "Would you like to replace the existing web interface with the new one? (y/n) [default: y]: " REPLACE_OLD || true
+else
+    REPLACE_OLD="${REPLACE_OLD:-y}"
+fi
 REPLACE_OLD=${REPLACE_OLD:-y}
 
 echo -e "\n${C_GREEN}[3/4] Installing web interface files to ${DEST_DIR}...${C_RESET}"
@@ -70,6 +74,11 @@ if [ -d "$DEST_DIR" ]; then
 fi
 sudo mkdir -p "$DEST_DIR"
 sudo cp -r "$SRC_DIR/index.html" "$SRC_DIR/css" "$SRC_DIR/js" "$DEST_DIR/"
+if [ -n "${SUDO_USER:-}" ]; then
+    sudo chown -R "${SUDO_USER}:${SUDO_USER}" "$DEST_DIR" || true
+elif [ "$(id -u)" -ne 0 ]; then
+    sudo chown -R "$(id -un):$(id -gn)" "$DEST_DIR" || true
+fi
 sudo chmod -R a+rX "$DEST_DIR"
 
 # Keep /home/pi/klipper-web-ui synced if it was used previously
@@ -78,26 +87,27 @@ if [ -d "/home/pi/klipper-web-ui" ] || [ -L "/home/pi/klipper-web-ui" ]; then
     sudo ln -s "$DEST_DIR" "/home/pi/klipper-web-ui" || true
 fi
 
-# Check if MainsailOS / FluiddOS upstream definitions already exist in /etc/nginx/conf.d/
-NEED_UPSTREAM=1
-if grep -rq "upstream apiserver" /etc/nginx/conf.d/ 2>/dev/null; then
-    NEED_UPSTREAM=0
-fi
-
-UPSTREAM_BLOCK=""
-if [ "$NEED_UPSTREAM" -eq 1 ]; then
-    UPSTREAM_BLOCK='map $http_upgrade $connection_upgrade {
+# Independently check if MainsailOS / FluiddOS already defines connection_upgrade or upstream apiserver
+MAP_BLOCK=""
+if ! grep -rq "connection_upgrade" /etc/nginx/conf.d/ /etc/nginx/nginx.conf 2>/dev/null; then
+    MAP_BLOCK='map $http_upgrade $connection_upgrade {
     default upgrade;
     "" close;
 }
-upstream apiserver {
+'
+fi
+
+UPSTREAM_BLOCK=""
+if ! grep -rq "upstream apiserver" /etc/nginx/conf.d/ /etc/nginx/nginx.conf 2>/dev/null; then
+    UPSTREAM_BLOCK='upstream apiserver {
     ip_hash;
     server 127.0.0.1:7125;
-}'
+}
+'
 fi
 
 WEBCAM_BLOCK=""
-if grep -rq "upstream mjpgstreamer1" /etc/nginx/conf.d/ 2>/dev/null; then
+if grep -rq "upstream mjpgstreamer1" /etc/nginx/conf.d/ /etc/nginx/nginx.conf 2>/dev/null; then
     WEBCAM_BLOCK='
     location /webcam/ {
         postpone_output 0;
@@ -126,14 +136,15 @@ if [[ "$REPLACE_OLD" =~ ^[Yy]$ ]]; then
     echo -e "${C_GRAY}Backed up previous Nginx site configs to ${BACKUP_DIR}${C_RESET}"
 else
     echo -e "${C_CYAN}Keeping existing Port 80 web interface and installing on a secondary port...${C_RESET}"
-    read -r -p "Enter port for the Klipper Web UI [default: 8090]: " CUSTOM_PORT
+    if [ -t 0 ]; then
+        read -r -p "Enter port for the Klipper Web UI [default: 8090]: " CUSTOM_PORT || true
+    fi
     LISTEN_PORT=${CUSTOM_PORT:-8090}
     sudo rm -f /etc/nginx/sites-enabled/klipper-web-ui /etc/nginx/sites-enabled/klipper-screen-web 2>/dev/null || true
 fi
 
 cat <<EOF | sudo tee /etc/nginx/sites-available/klipper-screen-web >/dev/null
-$UPSTREAM_BLOCK
-server {
+${MAP_BLOCK}${UPSTREAM_BLOCK}server {
     listen ${LISTEN_PORT};
     server_name _;
 
@@ -171,6 +182,9 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Scheme \$scheme;
+        proxy_read_timeout 600;
+        proxy_buffering off;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
     }
 $WEBCAM_BLOCK
 }
